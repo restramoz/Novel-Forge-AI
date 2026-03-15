@@ -107,7 +107,7 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
 
     const { novel, chapters } = ctx;
     const nextChapterNum = chapters.length + 1;
-    const selectedModel = model || novel.model || "llama3.2";
+    const selectedModel = model || novel.model || "qwen3.5:397b-cloud";
 
     const systemPrompt = buildSystemPrompt(novel, novel.language);
     const userPrompt = buildChapterPrompt(novel, chapters, nextChapterNum, chapterTitle, additionalContext);
@@ -230,7 +230,7 @@ router.post("/generate", async (req: Request, res: Response) => {
 
     const { novel, chapters } = ctx;
     const nextChapterNum = chapters.length + 1;
-    const selectedModel = model || novel.model || "llama3.2";
+    const selectedModel = model || novel.model || "qwen3.5:397b-cloud";
 
     const systemPrompt = buildSystemPrompt(novel, novel.language);
     const userPrompt = buildChapterPrompt(novel, chapters, nextChapterNum, chapterTitle, additionalContext);
@@ -303,6 +303,7 @@ router.get("/models", async (_req: Request, res: Response) => {
     if (!response.ok) {
       return res.status(200).json({
         models: [
+          { name: "qwen3.5:397b-cloud", size: 0, modifiedAt: new Date().toISOString() },
           { name: "llama3.2", size: 0, modifiedAt: new Date().toISOString() },
           { name: "llama3.1", size: 0, modifiedAt: new Date().toISOString() },
           { name: "mistral", size: 0, modifiedAt: new Date().toISOString() },
@@ -324,6 +325,7 @@ router.get("/models", async (_req: Request, res: Response) => {
     if (models.length === 0) {
       return res.status(200).json({
         models: [
+          { name: "qwen3.5:397b-cloud", size: 0, modifiedAt: new Date().toISOString() },
           { name: "llama3.2", size: 0, modifiedAt: new Date().toISOString() },
           { name: "llama3.1", size: 0, modifiedAt: new Date().toISOString() },
           { name: "mistral", size: 0, modifiedAt: new Date().toISOString() },
@@ -340,6 +342,7 @@ router.get("/models", async (_req: Request, res: Response) => {
     console.error("Error fetching models:", err);
     res.status(200).json({
       models: [
+        { name: "qwen3.5:397b-cloud", size: 0, modifiedAt: new Date().toISOString() },
         { name: "llama3.2", size: 0, modifiedAt: new Date().toISOString() },
         { name: "llama3.1", size: 0, modifiedAt: new Date().toISOString() },
         { name: "mistral", size: 0, modifiedAt: new Date().toISOString() },

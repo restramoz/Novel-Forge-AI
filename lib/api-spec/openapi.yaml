@@ -420,7 +420,7 @@ components:
           default: Indonesian
         model:
           type: string
-          default: llama3.2
+          default: qwen3.5:397b-cloud
         writingStyle:
           type: string
         targetChapters:

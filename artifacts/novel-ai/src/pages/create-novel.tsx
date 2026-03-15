@@ -16,7 +16,7 @@ export default function CreateNovel() {
     genre: "Fantasy",
     synopsis: "",
     language: "English",
-    model: "llama3.2",
+    model: "qwen3.5:397b-cloud",
     writingStyle: "Descriptive and atmospheric",
     targetChapters: 20
   });
@@ -151,7 +151,7 @@ export default function CreateNovel() {
               <input 
                 value={formData.model}
                 onChange={e => setFormData({...formData, model: e.target.value})}
-                placeholder="llama3.2"
+                placeholder="qwen3.5:397b-cloud"
                 className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:border-primary transition-all"
               />
             </div>
