@@ -4,60 +4,71 @@ export function useChapterStream(novelId: number) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const generate = async (params: any, onChunk: (text: string) => void) => {
+  const generate = async (
+    params: Record<string, unknown>,
+    onChunk: (text: string) => void
+  ): Promise<{ success: boolean; error?: string }> => {
     setIsGenerating(true);
     setError(null);
-    
+
     try {
       const res = await fetch(`/api/novels/${novelId}/generate-stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params)
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
       });
 
       if (!res.ok) {
-        throw new Error(`Failed to generate: ${res.statusText}`);
+        const msg = `Gagal terhubung ke server: ${res.status} ${res.statusText}`;
+        setError(msg);
+        return { success: false, error: msg };
       }
 
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
-      
-      if (!reader) throw new Error("No readable stream available");
+
+      if (!reader) {
+        const msg = "Tidak ada stream yang tersedia";
+        setError(msg);
+        return { success: false, error: msg };
+      }
+
+      let buffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        
-        // Handle SSE format "data: {...}\n\n" or raw text
-        const lines = chunk.split('\n');
-        let processedChunk = "";
-        
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
         for (const line of lines) {
-          if (line.startsWith('data:')) {
-            const dataStr = line.slice(5).trim();
-            if (dataStr && dataStr !== '[DONE]') {
-              try {
-                const json = JSON.parse(dataStr);
-                processedChunk += (json.response || json.content || json.text || "");
-              } catch {
-                processedChunk += dataStr.replace(/\\n/g, '\n');
-              }
+          if (!line.startsWith("data:")) continue;
+          const dataStr = line.slice(5).trim();
+          if (!dataStr || dataStr === "[DONE]") continue;
+
+          try {
+            const json = JSON.parse(dataStr);
+            if (json.error) {
+              const msg = String(json.error);
+              setError(msg);
+              return { success: false, error: msg };
             }
-          } else if (line.trim() && !line.startsWith('id:') && !line.startsWith('event:')) {
-            // Fallback for raw streaming text
-            processedChunk += line + '\n';
+            // token field from our backend SSE
+            const token = json.token ?? json.response ?? json.content ?? json.text ?? "";
+            if (token) onChunk(token);
+          } catch {
+            // skip non-JSON lines
           }
         }
-        
-        if (processedChunk) {
-          onChunk(processedChunk);
-        }
       }
+
+      return { success: true };
     } catch (err) {
-      console.error("Stream error:", err);
-      setError(err instanceof Error ? err.message : "Unknown stream error");
+      const msg = err instanceof Error ? err.message : "Kesalahan tidak diketahui";
+      setError(msg);
+      return { success: false, error: msg };
     } finally {
       setIsGenerating(false);
     }
