@@ -1,15 +1,20 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Novel AI API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: novels
+    description: Novel operations
+  - name: chapters
+    description: Chapter operations
+  - name: generate
+    description: AI generation operations
 paths:
   /healthz:
     get:
@@ -24,6 +29,300 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /novels:
+    get:
+      operationId: listNovels
+      tags: [novels]
+      summary: List all novels
+      parameters:
+        - name: genre
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: List of novels
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NovelListResponse"
+    post:
+      operationId: createNovel
+      tags: [novels]
+      summary: Create a new novel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNovelRequest"
+      responses:
+        "201":
+          description: Novel created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Novel"
+
+  /novels/{id}:
+    get:
+      operationId: getNovel
+      tags: [novels]
+      summary: Get a novel by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Novel details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Novel"
+        "404":
+          description: Novel not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateNovel
+      tags: [novels]
+      summary: Update a novel
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateNovelRequest"
+      responses:
+        "200":
+          description: Novel updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Novel"
+    delete:
+      operationId: deleteNovel
+      tags: [novels]
+      summary: Delete a novel
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Novel deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /novels/{id}/chapters:
+    get:
+      operationId: listChapters
+      tags: [chapters]
+      summary: List all chapters for a novel
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of chapters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterListResponse"
+    post:
+      operationId: createChapter
+      tags: [chapters]
+      summary: Add a chapter manually
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChapterRequest"
+      responses:
+        "201":
+          description: Chapter created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chapter"
+
+  /novels/{id}/chapters/{chapterId}:
+    get:
+      operationId: getChapter
+      tags: [chapters]
+      summary: Get a chapter by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Chapter details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chapter"
+    put:
+      operationId: updateChapter
+      tags: [chapters]
+      summary: Update a chapter
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChapterRequest"
+      responses:
+        "200":
+          description: Chapter updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chapter"
+    delete:
+      operationId: deleteChapter
+      tags: [chapters]
+      summary: Delete a chapter
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Chapter deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /novels/{id}/generate:
+    post:
+      operationId: generateChapter
+      tags: [generate]
+      summary: Generate next chapter(s) using AI
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateChapterRequest"
+      responses:
+        "200":
+          description: Generated chapter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chapter"
+
+  /novels/{id}/generate-stream:
+    post:
+      operationId: generateChapterStream
+      tags: [generate]
+      summary: Stream generate next chapter using AI (SSE)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateChapterRequest"
+      responses:
+        "200":
+          description: SSE stream of generated text
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /models:
+    get:
+      operationId: listModels
+      tags: [generate]
+      summary: List available Ollama models
+      responses:
+        "200":
+          description: Available models
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelListResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +333,262 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+
+    Novel:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        synopsis:
+          type: string
+        genre:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        language:
+          type: string
+        model:
+          type: string
+        writingStyle:
+          type: string
+        targetChapters:
+          type: integer
+        chapterCount:
+          type: integer
+        wordCount:
+          type: integer
+        status:
+          type: string
+          enum: [draft, in_progress, completed, paused]
+        coverImage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - genre
+        - status
+        - chapterCount
+        - wordCount
+        - createdAt
+        - updatedAt
+
+    CreateNovelRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        synopsis:
+          type: string
+        genre:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        language:
+          type: string
+          default: Indonesian
+        model:
+          type: string
+          default: llama3.2
+        writingStyle:
+          type: string
+        targetChapters:
+          type: integer
+          default: 10
+        coverImage:
+          type: string
+          nullable: true
+      required:
+        - title
+        - genre
+
+    UpdateNovelRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        synopsis:
+          type: string
+        genre:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        language:
+          type: string
+        model:
+          type: string
+        writingStyle:
+          type: string
+        targetChapters:
+          type: integer
+        status:
+          type: string
+          enum: [draft, in_progress, completed, paused]
+        coverImage:
+          type: string
+          nullable: true
+
+    NovelListResponse:
+      type: object
+      properties:
+        novels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Novel"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        totalPages:
+          type: integer
+      required:
+        - novels
+        - total
+        - page
+        - limit
+        - totalPages
+
+    Chapter:
+      type: object
+      properties:
+        id:
+          type: integer
+        novelId:
+          type: integer
+        chapterNumber:
+          type: integer
+        title:
+          type: string
+        content:
+          type: string
+        wordCount:
+          type: integer
+        isGenerated:
+          type: boolean
+        generationPrompt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - novelId
+        - chapterNumber
+        - title
+        - content
+        - wordCount
+        - isGenerated
+        - createdAt
+        - updatedAt
+
+    CreateChapterRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+        chapterNumber:
+          type: integer
+      required:
+        - title
+        - content
+
+    UpdateChapterRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+
+    ChapterListResponse:
+      type: object
+      properties:
+        chapters:
+          type: array
+          items:
+            $ref: "#/components/schemas/Chapter"
+        total:
+          type: integer
+      required:
+        - chapters
+        - total
+
+    GenerateChapterRequest:
+      type: object
+      properties:
+        model:
+          type: string
+        additionalContext:
+          type: string
+        temperature:
+          type: number
+          default: 0.8
+        maxTokens:
+          type: integer
+          default: 4000
+        chapterTitle:
+          type: string
+      required: []
+
+    ModelListResponse:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/OllamaModel"
+      required:
+        - models
+
+    OllamaModel:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        modifiedAt:
+          type: string
+      required:
+        - name

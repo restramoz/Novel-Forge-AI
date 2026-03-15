@@ -1,0 +1,17 @@
+packages:
+  "framer-motion": "For premium page transitions and micro-interactions"
+  "react-markdown": "To safely render generated markdown chapter content"
+  "date-fns": "For elegant date formatting in novel metadata"
+  "react-intersection-observer": "For active state tracking in the reader's Table of Contents"
+
+images:
+  - path: "artifacts/novel-ai/public/images/cover-placeholder.png"
+    description: "An elegant, minimalist book cover background, dark leather texture with subtle gold embossed geometric patterns, perfect for a luxury fantasy or mystery novel"
+    aspect_ratio: "3:4"
+  - path: "artifacts/novel-ai/public/images/hero-bg.png"
+    description: "A dark, moody, cinematic background of an ancient grand library, glowing amber lights reflecting off dust motes, blurred and atmospheric"
+    aspect_ratio: "16:9"
+
+notes:
+  - Application uses dark luxury literary aesthetic.
+  - Streaming generation handles raw text or JSON SSE chunks.
