@@ -61,6 +61,16 @@ export default function Reader() {
     }
   }, [chapters.length]);
 
+  // Remove the leading "# Bab X: ..." heading from content to avoid duplicate with rendered header
+  function stripLeadingHeading(content: string): string {
+    return content.replace(/^#{1,3}[^\n]*\n+/, "").trim();
+  }
+
+  // Strip "Bab X: " or "Chapter X: " prefix from the stored title for clean display
+  function cleanTitle(title: string): string {
+    return title.replace(/^(Bab|Chapter)\s+\d+[:\s]+/i, "").trim();
+  }
+
   if (novelLoading || chaptersLoading) return <div className="h-screen flex items-center justify-center font-serif text-2xl animate-pulse">Loading Book...</div>;
   if (!novel) return <div className="h-screen flex items-center justify-center">Novel not found.</div>;
 
@@ -139,7 +149,7 @@ export default function Reader() {
                   <div className={`w-5 h-5 rounded-full flex items-center justify-center bg-background border-2 transition-colors ${isActive ? 'border-primary' : 'border-border/50'}`}>
                     {isActive && <div className="w-2 h-2 rounded-full bg-primary"></div>}
                   </div>
-                  <span className="truncate">{chap.chapterNumber}. {chap.title}</span>
+                  <span className="truncate">{chap.chapterNumber}. {cleanTitle(chap.title)}</span>
                 </a>
               );
             })}
@@ -162,7 +172,7 @@ export default function Reader() {
                       Chapter {chap.chapterNumber}
                     </span>
                     <h1 className="text-4xl md:text-5xl font-serif font-bold text-foreground leading-tight">
-                      {chap.title}
+                      {cleanTitle(chap.title)}
                     </h1>
                     {index === 0 && <hr className="w-24 mx-auto mt-12 border-primary/30" />}
                   </header>
@@ -171,7 +181,7 @@ export default function Reader() {
                     className="prose-reader max-w-none text-justify"
                     style={{ fontSize: `${fontSize}px` }}
                   >
-                    <ReactMarkdown>{chap.content}</ReactMarkdown>
+                    <ReactMarkdown>{stripLeadingHeading(chap.content)}</ReactMarkdown>
                   </div>
                   
                   {index < chapters.length - 1 && (
