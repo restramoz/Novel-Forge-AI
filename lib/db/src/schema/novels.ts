@@ -9,7 +9,7 @@ export const novelsTable = pgTable("novels", {
   genre: text("genre").notNull(),
   tags: text("tags").default("[]"),
   language: text("language").notNull().default("Indonesian"),
-  model: text("model").notNull().default("qwen2.5:72b-instruct"),
+  model: text("model").notNull().default("deepseek-v3.2:cloud"),
   globalSummary: text("global_summary").default(""),
   writingStyle: text("writing_style").default(""),
   targetChapters: integer("target_chapters").notNull().default(10),

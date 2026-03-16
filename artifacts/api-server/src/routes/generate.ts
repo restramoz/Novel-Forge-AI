@@ -7,7 +7,10 @@ const router: IRouter = Router({ mergeParams: true });
 
 const OLLAMA_HOST = "https://ollama.com";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "ff272933709f4fc59467cc47b8c0cd02.XXqy0eSTEGXQ8OAZpfGzH1wR";
-const DEFAULT_MODEL = "qwen2.5:72b-instruct";
+const DEFAULT_MODEL = "deepseek-v3.2:cloud";
+
+// In-memory lock: prevent duplicate concurrent generation for the same novel
+const generatingNovels = new Set<number>();
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -115,28 +118,22 @@ async function updateNovelStats(novelId: number) {
 }
 
 // Get minimal context: novel + only last chapter's tail
+// Uses MAX(chapter_number) so deletions/gaps don't confuse the next number
 async function getNovelContext(novelId: number) {
   const [novel] = await db.select().from(novelsTable).where(eq(novelsTable.id, novelId));
   if (!novel) return null;
 
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
+  const [last] = await db
+    .select({ chapterNumber: chaptersTable.chapterNumber, content: chaptersTable.content })
     .from(chaptersTable)
-    .where(eq(chaptersTable.novelId, novelId));
-  const totalChapters = Number(countResult[0]?.count ?? 0);
+    .where(eq(chaptersTable.novelId, novelId))
+    .orderBy(desc(chaptersTable.chapterNumber))
+    .limit(1);
 
-  let lastChapter: { chapterNumber: number; content: string } | null = null;
-  if (totalChapters > 0) {
-    const [last] = await db
-      .select({ chapterNumber: chaptersTable.chapterNumber, content: chaptersTable.content })
-      .from(chaptersTable)
-      .where(eq(chaptersTable.novelId, novelId))
-      .orderBy(desc(chaptersTable.chapterNumber))
-      .limit(1);
-    lastChapter = last ?? null;
-  }
+  const lastChapter = last ?? null;
+  const maxChapterNum = lastChapter?.chapterNumber ?? 0;
 
-  return { novel, totalChapters, lastChapter };
+  return { novel, maxChapterNum, lastChapter };
 }
 
 function buildOllamaOptions(
@@ -160,15 +157,20 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
   const novelId = parseInt(req.params.id);
   const { model, additionalContext, temperature = 0.85, maxTokens = 8000, chapterTitle } = req.body;
 
+  // Reject duplicate concurrent generation for the same novel
+  if (generatingNovels.has(novelId)) {
+    return res.status(409).json({ error: "already_generating", message: "Bab sedang di-generate, tunggu hingga selesai." });
+  }
+  generatingNovels.add(novelId);
+
   try {
     const ctx = await getNovelContext(novelId);
     if (!ctx) return res.status(404).json({ error: "not_found", message: "Novel not found" });
 
-    const { novel, totalChapters, lastChapter } = ctx;
-    const nextChapterNum = totalChapters + 1;
+    const { novel, maxChapterNum, lastChapter } = ctx;
+    const nextChapterNum = maxChapterNum + 1;
     const selectedModel = model || novel.model || DEFAULT_MODEL;
 
-    // Only last 1500 chars of last chapter's content
     const lastTail = lastChapter
       ? lastChapter.content.slice(-1500).trimStart()
       : "";
@@ -226,8 +228,9 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let ollamaDone = false;
 
-    while (true) {
+    while (!ollamaDone) {
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -244,7 +247,10 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
             fullContent += token;
             res.write(`data: ${JSON.stringify({ token, done: false })}\n\n`);
           }
-          if (parsed.done) break;
+          if (parsed.done) {
+            ollamaDone = true;
+            break;
+          }
         } catch {
           // skip malformed JSON lines
         }
@@ -258,7 +264,8 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
         ? titleMatch[1].replace(/^Bab\s+\d+[:\s]*/i, "").trim()
         : chapterTitle || `Bab ${nextChapterNum}`;
 
-      const [chapter] = await db
+      // onConflictDoNothing: DB-level guard against duplicate chapter numbers
+      const inserted = await db
         .insert(chaptersTable)
         .values({
           novelId,
@@ -269,9 +276,17 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
           isGenerated: true,
           generationPrompt: userPrompt.substring(0, 600),
         })
+        .onConflictDoNothing()
         .returning();
 
-      // Update stats and global summary in parallel
+      if (inserted.length === 0) {
+        res.write(`data: ${JSON.stringify({ done: true, error: `Bab ${nextChapterNum} sudah ada di database.` })}\n\n`);
+        res.end();
+        return;
+      }
+
+      const chapter = inserted[0];
+
       await Promise.all([
         updateNovelStats(novelId),
         updateGlobalSummary(novelId, nextChapterNum, fullContent),
@@ -291,6 +306,8 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
     } catch {
       res.end();
     }
+  } finally {
+    generatingNovels.delete(novelId);
   }
 });
 
@@ -300,12 +317,17 @@ router.post("/generate", async (req: Request, res: Response) => {
   const novelId = parseInt(req.params.id);
   const { model, additionalContext, temperature = 0.85, maxTokens = 8000, chapterTitle } = req.body;
 
+  if (generatingNovels.has(novelId)) {
+    return res.status(409).json({ error: "already_generating", message: "Bab sedang di-generate, tunggu hingga selesai." });
+  }
+  generatingNovels.add(novelId);
+
   try {
     const ctx = await getNovelContext(novelId);
     if (!ctx) return res.status(404).json({ error: "not_found", message: "Novel not found" });
 
-    const { novel, totalChapters, lastChapter } = ctx;
-    const nextChapterNum = totalChapters + 1;
+    const { novel, maxChapterNum, lastChapter } = ctx;
+    const nextChapterNum = maxChapterNum + 1;
     const selectedModel = model || novel.model || DEFAULT_MODEL;
 
     const lastTail = lastChapter ? lastChapter.content.slice(-1500).trimStart() : "";
@@ -355,7 +377,7 @@ router.post("/generate", async (req: Request, res: Response) => {
       ? titleMatch[1].replace(/^Bab\s+\d+[:\s]*/i, "").trim()
       : chapterTitle || `Bab ${nextChapterNum}`;
 
-    const [chapter] = await db
+    const inserted = await db
       .insert(chaptersTable)
       .values({
         novelId,
@@ -366,17 +388,24 @@ router.post("/generate", async (req: Request, res: Response) => {
         isGenerated: true,
         generationPrompt: userPrompt.substring(0, 600),
       })
+      .onConflictDoNothing()
       .returning();
+
+    if (inserted.length === 0) {
+      return res.status(409).json({ error: "duplicate_chapter", message: `Bab ${nextChapterNum} sudah ada.` });
+    }
 
     await Promise.all([
       updateNovelStats(novelId),
       updateGlobalSummary(novelId, nextChapterNum, fullContent),
     ]);
 
-    res.json(chapter);
+    res.json(inserted[0]);
   } catch (err) {
     console.error("Generate error:", err);
     res.status(500).json({ error: "internal_error", message: String(err) });
+  } finally {
+    generatingNovels.delete(novelId);
   }
 });
 

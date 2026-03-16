@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, boolean, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { novelsTable } from "./novels";
@@ -14,7 +14,9 @@ export const chaptersTable = pgTable("chapters", {
   generationPrompt: text("generation_prompt"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  unique("chapters_novel_chapter_unique").on(table.novelId, table.chapterNumber),
+]);
 
 export const insertChapterSchema = createInsertSchema(chaptersTable).omit({
   id: true,

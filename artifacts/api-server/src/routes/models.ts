@@ -6,6 +6,7 @@ const OLLAMA_HOST = "https://ollama.com";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "ff272933709f4fc59467cc47b8c0cd02.XXqy0eSTEGXQ8OAZpfGzH1wR";
 
 const PREFERRED_MODELS = [
+  "deepseek-v3.2:cloud",
   "deepseek-v3",
   "qwen2.5:72b-instruct",
   "llama-3.3-70b-specdec",
