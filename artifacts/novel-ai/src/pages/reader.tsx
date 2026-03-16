@@ -23,11 +23,10 @@ export default function Reader() {
   const [readingProgress, setReadingProgress] = useState(0);
   const [bookmarkFlash, setBookmarkFlash] = useState(false);
 
-  // Throttle ref for saving
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track last saved position to detect actual movement
   const lastSavedScrollY = useRef<number>(-1);
 
-  // ---------- helpers ----------
+  // ── helpers ──────────────────────────────────────────────────────────────────
   function stripLeadingHeading(content: string): string {
     return content.replace(/^#{1,3}[^\n]*\n+/, "").trim();
   }
@@ -35,45 +34,51 @@ export default function Reader() {
     return title.replace(/^(Bab|Chapter)\s+\d+[:\s]+/i, "").trim();
   }
 
-  // Find which chapter the user is currently reading based on scroll position
-  const getActiveChapterAtScroll = useCallback(() => {
-    let found: (typeof chapters)[0] | null = null;
+  // Returns the chapter currently visible at the top reading area
+  const getActiveChapter = useCallback(() => {
+    // Find the last chapter whose top is at or above the reading line (160px from top)
+    let active: (typeof chapters)[0] | null = null;
     for (const chap of chapters) {
       const el = document.getElementById(`chapter-${chap.id}`);
       if (!el) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.top <= 160 && rect.bottom >= 160) { found = chap; break; }
-      // Also catch if we're above the first detected, keep as candidate
-      if (rect.top > 160 && !found) break;
+      const top = el.getBoundingClientRect().top;
+      if (top <= 160) active = chap;
+      else break; // chapters are ordered, so we can stop early
     }
-    // Fallback: find the last chapter whose top is above mid-screen
-    if (!found) {
-      for (let i = chapters.length - 1; i >= 0; i--) {
-        const el = document.getElementById(`chapter-${chapters[i].id}`);
-        if (el && el.getBoundingClientRect().top <= 160) {
-          found = chapters[i];
-          break;
-        }
-      }
-    }
-    return found;
+    return active;
   }, [chapters]);
 
-  // Persist scroll position (throttled — saves at most once per 1.5s)
-  const persistPosition = useCallback(() => {
-    if (saveTimerRef.current) return;
-    saveTimerRef.current = setTimeout(() => {
-      saveTimerRef.current = null;
+  // ── Scroll handler: progress bar + active TOC highlight ───────────────────
+  useEffect(() => {
+    const onScroll = () => {
+      const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
+      const pct = totalHeight > 0 ? (window.scrollY / totalHeight) * 100 : 0;
+      setReadingProgress(pct);
 
+      const chap = getActiveChapter();
+      if (chap && chap.id !== activeChapterId) setActiveChapterId(chap.id);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [chapters, activeChapterId, getActiveChapter]);
+
+  // ── Interval save: every 2 seconds, persist position if user has moved ─────
+  useEffect(() => {
+    if (chapters.length === 0) return;
+
+    const interval = setInterval(() => {
       const currentY = window.scrollY;
-      if (Math.abs(currentY - lastSavedScrollY.current) < 20) return; // no meaningful change
-      lastSavedScrollY.current = currentY;
+
+      // Skip if barely moved from last save (< 50px)
+      if (Math.abs(currentY - lastSavedScrollY.current) < 50) return;
 
       const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
       const progressPct = totalHeight > 0 ? Math.round((currentY / totalHeight) * 100) : 0;
 
-      const chap = getActiveChapterAtScroll();
+      const chap = getActiveChapter();
       if (!chap) return;
+
+      lastSavedScrollY.current = currentY;
 
       saveLastRead(novelId, {
         chapterId: chap.id,
@@ -83,73 +88,58 @@ export default function Reader() {
         progressPct,
       });
 
-      // Brief bookmark flash to give feedback
+      // Brief visual feedback on the bookmark icon
       setBookmarkFlash(true);
-      setTimeout(() => setBookmarkFlash(false), 600);
-    }, 1500);
-  }, [novelId, getActiveChapterAtScroll]);
+      setTimeout(() => setBookmarkFlash(false), 700);
+    }, 2000);
 
-  // Main scroll handler
-  useEffect(() => {
-    const handleScroll = () => {
-      // Update progress bar
-      const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
-      const pct = totalHeight > 0 ? (window.scrollY / totalHeight) * 100 : 0;
-      setReadingProgress(pct);
+    return () => clearInterval(interval);
+  }, [chapters, novelId, getActiveChapter]);
 
-      // Update active chapter in TOC
-      const chap = getActiveChapterAtScroll();
-      if (chap && chap.id !== activeChapterId) setActiveChapterId(chap.id);
-
-      // Persist position
-      persistPosition();
-    };
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", handleScroll);
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [chapters, activeChapterId, persistPosition, getActiveChapterAtScroll]);
-
-  // Initial scroll: resume exact position OR go to hash OR start at top
+  // ── Initial scroll: resume exact position OR hash OR top ──────────────────
   useEffect(() => {
     if (chapters.length === 0) return;
 
-    const doScroll = () => {
+    const go = () => {
       if (isResume) {
-        // Restore exact saved position
         const saved = getLastRead(novelId);
-        if (saved && saved.scrollY > 0) {
+        if (saved && saved.scrollY > 50) {
+          // Seed the ref so the interval doesn't immediately re-save position 0
+          lastSavedScrollY.current = saved.scrollY;
           window.scrollTo({ top: saved.scrollY, behavior: "smooth" });
           return;
         }
       }
       if (window.location.hash) {
-        const elId = window.location.hash.substring(1);
-        const el = document.getElementById(elId);
-        if (el) el.scrollIntoView({ behavior: "smooth" });
-        return;
+        const el = document.getElementById(window.location.hash.substring(1));
+        if (el) { el.scrollIntoView({ behavior: "smooth" }); return; }
       }
-      // Default: first chapter, save as initial position
+      // First-time visit: mark chapter 1 as start
       const first = chapters[0];
-      setActiveChapterId(first.id);
-      saveLastRead(novelId, {
-        chapterId: first.id,
-        chapterNumber: first.chapterNumber,
-        chapterTitle: first.title,
-        scrollY: 0,
-        progressPct: 0,
-      });
+      if (first) {
+        setActiveChapterId(first.id);
+        lastSavedScrollY.current = 0;
+        saveLastRead(novelId, {
+          chapterId: first.id,
+          chapterNumber: first.chapterNumber,
+          chapterTitle: first.title,
+          scrollY: 0,
+          progressPct: 0,
+        });
+      }
     };
 
-    // Slight delay to let DOM settle
-    const t = setTimeout(doScroll, 400);
+    const t = setTimeout(go, 400);
     return () => clearTimeout(t);
   }, [chapters.length, novelId, isResume]);
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   if (novelLoading || chaptersLoading) {
-    return <div className="h-screen flex items-center justify-center font-serif text-2xl animate-pulse">Loading Book...</div>;
+    return (
+      <div className="h-screen flex items-center justify-center font-serif text-2xl animate-pulse">
+        Loading Book...
+      </div>
+    );
   }
   if (!novel) {
     return <div className="h-screen flex items-center justify-center">Novel not found.</div>;
@@ -159,7 +149,10 @@ export default function Reader() {
     <div className="relative min-h-screen bg-background text-foreground transition-colors duration-500">
       {/* Top Progress Bar */}
       <div className="fixed top-0 left-0 right-0 h-1 bg-muted z-50">
-        <div className="h-full bg-primary transition-all duration-150 ease-out" style={{ width: `${readingProgress}%` }} />
+        <div
+          className="h-full bg-primary transition-all duration-150 ease-out"
+          style={{ width: `${readingProgress}%` }}
+        />
       </div>
 
       {/* Floating Toolbar */}
@@ -171,10 +164,14 @@ export default function Reader() {
           <ArrowLeft className="w-5 h-5" />
         </Link>
 
-        {/* Bookmark indicator — flashes when position is saved */}
+        {/* Bookmark indicator — pulses briefly each time position saves */}
         <div
-          className={`w-10 h-10 rounded-full bg-card/80 backdrop-blur border border-border shadow-lg flex items-center justify-center transition-all duration-300 ${bookmarkFlash ? "text-primary border-primary scale-110" : "text-muted-foreground"}`}
           title="Posisi tersimpan otomatis"
+          className={`w-10 h-10 rounded-full bg-card/80 backdrop-blur border shadow-lg flex items-center justify-center transition-all duration-300 ${
+            bookmarkFlash
+              ? "text-primary border-primary scale-110"
+              : "text-muted-foreground border-border"
+          }`}
         >
           {bookmarkFlash ? <BookMarked className="w-5 h-5" /> : <Bookmark className="w-5 h-5" />}
         </div>
@@ -196,14 +193,26 @@ export default function Reader() {
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             className="fixed top-16 right-4 z-50 w-64 bg-card border border-border rounded-2xl shadow-2xl p-4 flex flex-col gap-4"
           >
-            <h4 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-2">Display Settings</h4>
+            <h4 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-2">
+              Display Settings
+            </h4>
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium flex items-center gap-2">
                 <Moon className="w-4 h-4" /> Theme
               </span>
               <div className="flex bg-muted rounded-lg p-1">
-                <button onClick={() => setTheme("light")} className={`px-3 py-1.5 rounded-md text-xs font-medium ${theme === "light" ? "bg-background shadow" : "text-muted-foreground"}`}>Light</button>
-                <button onClick={() => setTheme("dark")} className={`px-3 py-1.5 rounded-md text-xs font-medium ${theme === "dark" ? "bg-background shadow" : "text-muted-foreground"}`}>Dark</button>
+                <button
+                  onClick={() => setTheme("light")}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium ${theme === "light" ? "bg-background shadow" : "text-muted-foreground"}`}
+                >
+                  Light
+                </button>
+                <button
+                  onClick={() => setTheme("dark")}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium ${theme === "dark" ? "bg-background shadow" : "text-muted-foreground"}`}
+                >
+                  Dark
+                </button>
               </div>
             </div>
             <div className="space-y-3">
@@ -215,7 +224,8 @@ export default function Reader() {
               </div>
               <input
                 type="range" min="14" max="24" step="1"
-                value={fontSize} onChange={(e) => setFontSize(parseInt(e.target.value))}
+                value={fontSize}
+                onChange={(e) => setFontSize(parseInt(e.target.value))}
                 className="w-full accent-primary"
               />
             </div>
@@ -238,12 +248,20 @@ export default function Reader() {
                 <a
                   key={chap.id}
                   href={`#chapter-${chap.id}`}
-                  className={`relative z-10 flex items-center gap-4 py-2 text-sm transition-all ${isActive ? "text-primary font-medium pl-2" : "text-muted-foreground hover:text-foreground pl-0"}`}
+                  className={`relative z-10 flex items-center gap-4 py-2 text-sm transition-all ${
+                    isActive ? "text-primary font-medium pl-2" : "text-muted-foreground hover:text-foreground pl-0"
+                  }`}
                 >
-                  <div className={`w-5 h-5 rounded-full flex items-center justify-center bg-background border-2 transition-colors ${isActive ? "border-primary" : "border-border/50"}`}>
+                  <div
+                    className={`w-5 h-5 rounded-full flex items-center justify-center bg-background border-2 transition-colors ${
+                      isActive ? "border-primary" : "border-border/50"
+                    }`}
+                  >
                     {isActive && <div className="w-2 h-2 rounded-full bg-primary" />}
                   </div>
-                  <span className="truncate">{chap.chapterNumber}. {cleanTitle(chap.title)}</span>
+                  <span className="truncate">
+                    {chap.chapterNumber}. {cleanTitle(chap.title)}
+                  </span>
                 </a>
               );
             })}
@@ -279,7 +297,9 @@ export default function Reader() {
                   </div>
 
                   {index < chapters.length - 1 && (
-                    <div className="flex justify-center my-24 opacity-30 text-2xl tracking-[1em]">* * *</div>
+                    <div className="flex justify-center my-24 opacity-30 text-2xl tracking-[1em]">
+                      * * *
+                    </div>
                   )}
                 </article>
               ))}
