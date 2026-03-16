@@ -16,7 +16,7 @@ export default function CreateNovel() {
     genre: "Fantasy",
     synopsis: "",
     language: "English",
-    model: "qwen3.5:397b-cloud",
+    model: "qwen2.5:72b-instruct",
     writingStyle: "Descriptive and atmospheric",
     targetChapters: 20
   });

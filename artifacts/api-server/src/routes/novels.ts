@@ -81,7 +81,7 @@ router.post("/novels", async (req, res) => {
         genre,
         tags: parseTagsForDb(tags),
         language: language ?? "Indonesian",
-        model: model ?? "qwen3.5:397b-cloud",
+        model: model ?? "qwen2.5:72b-instruct",
         writingStyle: writingStyle ?? "",
         targetChapters: targetChapters ?? 10,
         status: "draft",
