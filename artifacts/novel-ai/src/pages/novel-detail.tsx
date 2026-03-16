@@ -141,13 +141,17 @@ export default function NovelDetail() {
               <div className="flex flex-wrap items-center gap-4 mt-auto">
                 {lastRead ? (
                   <Link
-                    href={`/novels/${novel.id}/read#chapter-${lastRead.chapterId}`}
+                    href={`/novels/${novel.id}/read?resume=1`}
                     className="flex items-center gap-2 px-8 py-3 rounded-xl bg-foreground text-background font-semibold hover:bg-foreground/90 hover:scale-105 active:scale-95 transition-all"
                   >
-                    <BookMarked className="w-5 h-5" />
+                    <BookMarked className="w-5 h-5 flex-shrink-0" />
                     <span className="flex flex-col items-start leading-tight">
-                      <span className="text-xs font-normal opacity-70">Lanjut Baca</span>
-                      <span>Bab {lastRead.chapterNumber}</span>
+                      <span className="text-xs font-normal opacity-60">Lanjut Baca</span>
+                      <span>Bab {lastRead.chapterNumber}
+                        {lastRead.progressPct > 0 && (
+                          <span className="font-normal opacity-70 ml-1.5">· {lastRead.progressPct}%</span>
+                        )}
+                      </span>
                     </span>
                   </Link>
                 ) : (
@@ -259,15 +263,17 @@ export default function NovelDetail() {
           </div>
         ) : chapters.length > 0 ? (
           <div className="flex flex-col gap-3">
-            {chapters.map((chap) => (
+            {chapters.map((chap) => {
+              const isLastRead = lastRead?.chapterId === chap.id;
+              return (
               <Link
                 key={chap.id}
-                href={`/novels/${novel.id}/read#chapter-${chap.id}`}
-                className="group flex items-center justify-between p-4 rounded-xl border border-border/50 bg-card hover:border-primary/50 hover:shadow-md transition-all"
+                href={isLastRead ? `/novels/${novel.id}/read?resume=1` : `/novels/${novel.id}/read#chapter-${chap.id}`}
+                className={`group flex items-center justify-between p-4 rounded-xl border bg-card hover:shadow-md transition-all ${isLastRead ? "border-primary/60 shadow-sm shadow-primary/10" : "border-border/50 hover:border-primary/50"}`}
               >
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center font-serif font-bold text-muted-foreground group-hover:text-primary transition-colors">
-                    {chap.chapterNumber}
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-serif font-bold transition-colors ${isLastRead ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground group-hover:text-primary"}`}>
+                    {isLastRead ? <BookMarked className="w-4 h-4" /> : chap.chapterNumber}
                   </div>
                   <div>
                     <h3 className="font-medium text-foreground group-hover:text-primary transition-colors">
@@ -280,15 +286,24 @@ export default function NovelDetail() {
                           <Sparkles className="w-3 h-3" /> AI
                         </span>
                       )}
+                      {isLastRead && lastRead.progressPct > 0 && (
+                        <span className="flex items-center gap-1 text-primary font-semibold">
+                          · Terakhir dibaca · {lastRead.progressPct}%
+                        </span>
+                      )}
+                      {isLastRead && lastRead.progressPct === 0 && (
+                        <span className="text-primary font-semibold">· Terakhir dibaca</span>
+                      )}
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span className="text-sm font-medium text-primary">Baca</span>
+                  <span className="text-sm font-medium text-primary">{isLastRead ? "Lanjutkan" : "Baca"}</span>
                   <ChevronRight className="w-5 h-5 text-primary" />
                 </div>
               </Link>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-16 border border-dashed border-border rounded-2xl bg-card/50">

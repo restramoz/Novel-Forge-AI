@@ -2,6 +2,8 @@ export interface LastReadInfo {
   chapterId: number;
   chapterNumber: number;
   chapterTitle: string;
+  scrollY: number;         // exact window.scrollY when saved
+  progressPct: number;     // 0-100 reading progress of the whole page
   savedAt: number;
 }
 
