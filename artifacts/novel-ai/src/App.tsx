@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/lib/theme";
 import Layout from "@/components/layout";
 import Home from "@/pages/home";
 import CreateNovel from "@/pages/create-novel";
+import EditNovel from "@/pages/edit-novel";
 import NovelDetail from "@/pages/novel-detail";
 import Reader from "@/pages/reader";
 import CreateChapter from "@/pages/create-chapter";
@@ -34,6 +35,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/novels/new" component={CreateNovel} />
+      <Route path="/novels/:id/edit" component={EditNovel} />
       <Route path="/novels/:id/read" component={Reader} />
       <Route path="/novels/:id/chapters/new" component={CreateChapter} />
       <Route path="/novels/:id" component={NovelDetail} />

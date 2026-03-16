@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "wouter";
 import { useGetNovel, useListChapters } from "@workspace/api-client-react";
 import ReactMarkdown from "react-markdown";
-import { ArrowLeft, Settings2, Bookmark, Check, Moon, Sun, Type } from "lucide-react";
+import { ArrowLeft, Settings2, Bookmark, Moon, Sun, Type } from "lucide-react";
 import { useTheme } from "@/lib/theme";
 import { motion, AnimatePresence } from "framer-motion";
+import { saveLastRead } from "@/hooks/use-last-read";
 
 export default function Reader() {
   const { id } = useParams();
@@ -43,23 +44,44 @@ export default function Reader() {
       }
       if (currentActive && currentActive !== activeChapter) {
         setActiveChapter(currentActive);
+        // Persist last read chapter for this novel
+        const readChap = chapters.find(c => c.id === currentActive);
+        if (readChap) {
+          saveLastRead(novelId, {
+            chapterId: readChap.id,
+            chapterNumber: readChap.chapterNumber,
+            chapterTitle: readChap.title,
+          });
+        }
       }
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [chapters, activeChapter]);
+  }, [chapters, activeChapter, novelId]);
 
-  // Initial scroll to hash if present
+  // Initial scroll to hash, and save chapter 1 as last read on first visit
   useEffect(() => {
-    if (chapters.length > 0 && window.location.hash) {
+    if (chapters.length === 0) return;
+    if (window.location.hash) {
       setTimeout(() => {
-        const id = window.location.hash.substring(1);
-        const el = document.getElementById(id);
+        const elId = window.location.hash.substring(1);
+        const el = document.getElementById(elId);
         if (el) el.scrollIntoView({ behavior: 'smooth' });
       }, 500);
+    } else {
+      // No hash — user is at top, mark chapter 1 as last read if not yet set
+      const first = chapters[0];
+      if (first) {
+        setActiveChapter(first.id);
+        saveLastRead(novelId, {
+          chapterId: first.id,
+          chapterNumber: first.chapterNumber,
+          chapterTitle: first.title,
+        });
+      }
     }
-  }, [chapters.length]);
+  }, [chapters.length, novelId]);
 
   // Remove the leading "# Bab X: ..." heading from content to avoid duplicate with rendered header
   function stripLeadingHeading(content: string): string {

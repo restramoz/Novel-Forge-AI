@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, useParams } from "wouter";
 import { useGetNovel, useListChapters, useDeleteNovel, getListNovelsQueryKey, getListChaptersQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useChapterStream } from "@/hooks/use-stream";
 import { motion, AnimatePresence } from "framer-motion";
-import { BookOpen, Edit3, Trash2, ArrowLeft, PenTool, Sparkles, Clock, FileText, ChevronRight, Loader2, CheckCircle2 } from "lucide-react";
+import { BookOpen, Edit3, Trash2, ArrowLeft, PenTool, Sparkles, Clock, FileText, ChevronRight, Loader2, CheckCircle2, BookMarked } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
+import { getLastRead, type LastReadInfo } from "@/hooks/use-last-read";
 
 export default function NovelDetail() {
   const { id } = useParams();
@@ -22,6 +23,11 @@ export default function NovelDetail() {
   const [generateDone, setGenerateDone] = useState(false);
   const [generateError, setGenerateError] = useState("");
   const [streamPreview, setStreamPreview] = useState("");
+  const [lastRead, setLastRead] = useState<LastReadInfo | null>(null);
+
+  useEffect(() => {
+    setLastRead(getLastRead(novelId));
+  }, [novelId]);
 
   const chapters = chaptersData?.chapters || [];
 
@@ -133,13 +139,26 @@ export default function NovelDetail() {
               </div>
 
               <div className="flex flex-wrap items-center gap-4 mt-auto">
-                <Link
-                  href={`/novels/${novel.id}/read`}
-                  className="flex items-center gap-2 px-8 py-3 rounded-xl bg-foreground text-background font-semibold hover:bg-foreground/90 hover:scale-105 active:scale-95 transition-all"
-                >
-                  <BookOpen className="w-5 h-5" />
-                  Baca Novel
-                </Link>
+                {lastRead ? (
+                  <Link
+                    href={`/novels/${novel.id}/read#chapter-${lastRead.chapterId}`}
+                    className="flex items-center gap-2 px-8 py-3 rounded-xl bg-foreground text-background font-semibold hover:bg-foreground/90 hover:scale-105 active:scale-95 transition-all"
+                  >
+                    <BookMarked className="w-5 h-5" />
+                    <span className="flex flex-col items-start leading-tight">
+                      <span className="text-xs font-normal opacity-70">Lanjut Baca</span>
+                      <span>Bab {lastRead.chapterNumber}</span>
+                    </span>
+                  </Link>
+                ) : (
+                  <Link
+                    href={`/novels/${novel.id}/read`}
+                    className="flex items-center gap-2 px-8 py-3 rounded-xl bg-foreground text-background font-semibold hover:bg-foreground/90 hover:scale-105 active:scale-95 transition-all"
+                  >
+                    <BookOpen className="w-5 h-5" />
+                    Baca Novel
+                  </Link>
+                )}
 
                 <button
                   onClick={handleGenerate}
