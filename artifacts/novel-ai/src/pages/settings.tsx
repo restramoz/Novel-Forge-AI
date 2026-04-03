@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Settings, Save, Wifi, WifiOff, CheckCircle, AlertCircle, Type, Brain, Loader2 } from "lucide-react";
-import { loadSettings, saveSettings, MODEL_LIST, getOllamaHost, type AppSettings } from "@/lib/settings-store";
+import { loadSettings, saveSettings, MODEL_LIST, type AppSettings } from "@/lib/settings-store";
 import { motion } from "framer-motion";
 import { useTheme } from "@/lib/theme";
 
@@ -25,16 +25,15 @@ export default function SettingsPage() {
   useEffect(() => {
     const s = loadSettings();
     setSettings(s);
-    if (s.ollamaEndpoint !== "local" && s.ollamaEndpoint !== "cloud") {
+    if (s.ollamaEndpoint !== "local") {
       setCustomEndpoint(s.ollamaEndpoint);
     }
   }, []);
 
+  const effectiveEndpoint = settings.ollamaEndpoint === "local" ? "local" : (customEndpoint.trim() || "local");
+
   const handleSave = () => {
-    const toSave = { ...settings };
-    if (settings.ollamaEndpoint === "custom" && customEndpoint.trim()) {
-      toSave.ollamaEndpoint = customEndpoint.trim();
-    }
+    const toSave = { ...settings, ollamaEndpoint: effectiveEndpoint };
     saveSettings(toSave);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -44,10 +43,7 @@ export default function SettingsPage() {
     setTesting(true);
     setTestResult(null);
     try {
-      const endpoint = settings.ollamaEndpoint === "custom" && customEndpoint.trim()
-        ? customEndpoint.trim()
-        : settings.ollamaEndpoint;
-      const resp = await fetch(`${API_BASE}/api/models?endpoint=${encodeURIComponent(endpoint)}`, {
+      const resp = await fetch(`${API_BASE}/api/models?endpoint=${encodeURIComponent(effectiveEndpoint)}`, {
         signal: AbortSignal.timeout(8000),
       });
       setTestResult(resp.ok ? "ok" : "fail");
@@ -128,40 +124,37 @@ export default function SettingsPage() {
           {/* Endpoint */}
           <div>
             <label className="text-sm font-medium text-muted-foreground block mb-3">Ollama Endpoint</label>
-            <div className="grid grid-cols-3 gap-2 mb-3">
-              {["local", "cloud", "custom"].map(opt => (
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {[
+                { key: "local", label: "Local", icon: <WifiOff className="w-3.5 h-3.5" /> },
+                { key: "custom", label: "Custom URL", icon: <Wifi className="w-3.5 h-3.5" /> },
+              ].map(opt => (
                 <button
-                  key={opt}
-                  onClick={() => update({ ollamaEndpoint: opt })}
+                  key={opt.key}
+                  onClick={() => update({ ollamaEndpoint: opt.key === "local" ? "local" : (customEndpoint || "custom") })}
                   className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors flex items-center justify-center gap-1.5 ${
-                    settings.ollamaEndpoint === opt || (opt === "custom" && settings.ollamaEndpoint !== "local" && settings.ollamaEndpoint !== "cloud")
+                    (opt.key === "local" && settings.ollamaEndpoint === "local") ||
+                    (opt.key === "custom" && settings.ollamaEndpoint !== "local")
                       ? "bg-primary/10 border-primary text-primary"
                       : "border-border text-muted-foreground hover:border-primary/50"
                   }`}
                 >
-                  {opt === "local" ? <WifiOff className="w-3.5 h-3.5" /> : opt === "cloud" ? <Wifi className="w-3.5 h-3.5" /> : null}
-                  {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                  {opt.icon} {opt.label}
                 </button>
               ))}
             </div>
-            {(settings.ollamaEndpoint === "custom" || (settings.ollamaEndpoint !== "local" && settings.ollamaEndpoint !== "cloud")) && (
+            {settings.ollamaEndpoint === "local" ? (
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <WifiOff className="w-3 h-3" /> Menggunakan: http://localhost:11434
+              </p>
+            ) : (
               <input
                 type="url"
                 placeholder="http://your-ollama-host:11434"
                 value={customEndpoint}
-                onChange={e => setCustomEndpoint(e.target.value)}
+                onChange={e => { setCustomEndpoint(e.target.value); update({ ollamaEndpoint: e.target.value || "local" }); }}
                 className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
               />
-            )}
-            {settings.ollamaEndpoint === "local" && (
-              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-                <WifiOff className="w-3 h-3" /> Menggunakan: http://localhost:11434
-              </p>
-            )}
-            {settings.ollamaEndpoint === "cloud" && (
-              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-                <Wifi className="w-3 h-3" /> Menggunakan: https://ollama.com
-              </p>
             )}
           </div>
 

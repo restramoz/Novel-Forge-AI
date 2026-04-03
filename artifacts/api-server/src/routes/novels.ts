@@ -149,8 +149,6 @@ router.delete("/novels/:id", async (req, res) => {
 });
 
 // Generate master concept from synopsis using AI
-const MASTER_CONCEPT_API_KEY = "ff272933709f4fc59467cc47b8c0cd02.XXqy0eSTEGXQ8OAZpfGzH1wR";
-
 router.post("/novels/:id/generate-master-concept", async (req, res) => {
   const id = parseInt(req.params.id);
   const { ollamaEndpoint } = req.body;
@@ -160,11 +158,9 @@ router.post("/novels/:id/generate-master-concept", async (req, res) => {
     if (!novel) return res.status(404).json({ error: "not_found" });
     if (!novel.synopsis?.trim()) return res.status(400).json({ error: "no_synopsis", message: "Sinopsis kosong." });
 
-    const host = !ollamaEndpoint || ollamaEndpoint === "local" ? "http://localhost:11434"
-      : ollamaEndpoint === "cloud" ? "https://ollama.com" : ollamaEndpoint;
-    const isCloud = host.includes("ollama.com");
+    const host = (!ollamaEndpoint || ollamaEndpoint === "local" || ollamaEndpoint === "cloud")
+      ? "http://localhost:11434" : ollamaEndpoint;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (isCloud) headers["Authorization"] = `Bearer ${MASTER_CONCEPT_API_KEY}`;
 
     const prompt = `Berdasarkan sinopsis berikut, buat Master Concept (rencana cerita lengkap) untuk novel "${novel.title}" genre ${novel.genre} dalam bahasa ${novel.language}.
 

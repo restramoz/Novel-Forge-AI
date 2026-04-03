@@ -1,7 +1,7 @@
 const KEY = "novel-ai-settings";
 
 export interface AppSettings {
-  ollamaEndpoint: "local" | "cloud" | string;
+  ollamaEndpoint: "local" | string; // "local" or custom URL
   defaultModel: string;
   readerFontFamily: string;
   readerFontSize: number;
@@ -31,7 +31,10 @@ export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    // Migrate: "cloud" → "local"
+    if (parsed.ollamaEndpoint === "cloud") parsed.ollamaEndpoint = "local";
+    return { ...DEFAULT_SETTINGS, ...parsed };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -42,10 +45,4 @@ export function saveSettings(s: Partial<AppSettings>) {
     const current = loadSettings();
     localStorage.setItem(KEY, JSON.stringify({ ...current, ...s }));
   } catch {}
-}
-
-export function getOllamaHost(endpoint: string): string {
-  if (endpoint === "local") return "http://localhost:11434";
-  if (endpoint === "cloud") return "https://ollama.com";
-  return endpoint;
 }

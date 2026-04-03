@@ -5,9 +5,7 @@ import { eq, sql, desc } from "drizzle-orm";
 
 const router: IRouter = Router({ mergeParams: true });
 
-const OLLAMA_LOCAL_HOST = "http://localhost:11434";
-const OLLAMA_CLOUD_HOST = "https://ollama.com";
-const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "ff272933709f4fc59467cc47b8c0cd02.XXqy0eSTEGXQ8OAZpfGzH1wR";
+const LOCAL_OLLAMA = "http://localhost:11434";
 const DEFAULT_MODEL = "deepseek-v3.2:cloud";
 
 const generatingNovels = new Set<number>();
@@ -16,11 +14,9 @@ function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-function resolveHost(endpoint?: string): { host: string; isCloud: boolean } {
-  if (!endpoint || endpoint === "local") return { host: OLLAMA_LOCAL_HOST, isCloud: false };
-  if (endpoint === "cloud") return { host: OLLAMA_CLOUD_HOST, isCloud: true };
-  const isCloud = endpoint.includes("ollama.com");
-  return { host: endpoint, isCloud };
+function resolveHost(endpoint?: string): string {
+  if (!endpoint || endpoint === "local" || endpoint === "cloud") return LOCAL_OLLAMA;
+  return endpoint;
 }
 
 function buildSystemPrompt(
@@ -41,9 +37,7 @@ ${novel.masterConcept}
 SINOPSIS AWAL: ${novel.synopsis || "Tidak ada sinopsis"}`
     : `SINOPSIS: ${novel.synopsis || "Tidak ada sinopsis"}`;
 
-  const customInstruction = hasCustomPrompt
-    ? `\nINSTRUKSI KHUSUS PENULIS:\n${novel.customPrompt}\n`
-    : "";
+  const customInstruction = hasCustomPrompt ? `\nINSTRUKSI KHUSUS PENULIS:\n${novel.customPrompt}\n` : "";
 
   const system = `Anda adalah Penulis Novel Profesional yang menulis dalam bahasa ${novel.language}.
 ${customInstruction}
@@ -52,7 +46,7 @@ ATURAN MUTLAK — WAJIB DIPATUHI:
 2. JANGAN menulis ulang atau merangkum kejadian dari bab sebelumnya.
 3. MULAI narasi langsung dari detik terakhir kejadian sebelumnya — sambungkan tanpa jeda.
 4. Gunakan gaya bahasa ${novel.genre} yang deskriptif, intens, dan imersif.
-5. Jika ini Bab ${chapNum}, pastikan alur BERGERAK MAJU sesuai rencana cerita, BUKAN berputar atau mengulang.
+5. Jika ini Bab ${chapNum}, pastikan alur BERGERAK MAJU sesuai rencana cerita.
 6. DILARANG menulis kata-kata seperti "Pada bab sebelumnya", "Seperti yang telah kita ketahui", "Kita kembali ke...".
 7. Tulis minimal 1500 kata, dengan dialog bermakna dan deskripsi lingkungan/emosi yang kaya.
 8. Format judul: hanya satu baris "# Bab ${chapNum}: [Judul Kreatif]" lalu langsung isi narasi.
@@ -76,7 +70,7 @@ Ini adalah bab pembuka. Perkenalkan:
 - Konflik atau misteri awal yang langsung menarik pembaca
 - Akhiri dengan hook yang membuat penasaran
 
-${hasMasterConcept ? `PERHATIAN: Ikuti Master Concept sebagai panduan arah cerita keseluruhan.` : ""}
+${hasMasterConcept ? "PERHATIAN: Ikuti Master Concept sebagai panduan arah cerita keseluruhan." : ""}
 
 Tulis minimal 1500 kata. Mulai langsung dengan narasi yang kuat.`;
   } else {
@@ -135,18 +129,12 @@ async function getNovelContext(novelId: number) {
     .where(eq(chaptersTable.novelId, novelId))
     .orderBy(desc(chaptersTable.chapterNumber))
     .limit(1);
-  const lastChapter = last ?? null;
-  const maxChapterNum = lastChapter?.chapterNumber ?? 0;
-  return { novel, maxChapterNum, lastChapter };
+  return { novel, maxChapterNum: last?.chapterNumber ?? 0, lastChapter: last ?? null };
 }
 
 function buildOllamaOptions(temperature: number, maxTokens: number, chapNum: number) {
   return {
-    temperature,
-    num_predict: maxTokens,
-    repeat_penalty: 1.25,
-    top_p: 0.9,
-    num_ctx: 16384,
+    temperature, num_predict: maxTokens, repeat_penalty: 1.25, top_p: 0.9, num_ctx: 16384,
     stop: [`Bab ${chapNum + 1}`, `BAB ${chapNum + 1}`, "PENULIS:", "---END---"],
   };
 }
@@ -164,18 +152,18 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
 
   try {
     const ctx = await getNovelContext(novelId);
-    if (!ctx) return res.status(404).json({ error: "not_found", message: "Novel not found" });
+    if (!ctx) return res.status(404).json({ error: "not_found" });
 
     const { novel, maxChapterNum, lastChapter } = ctx;
     const nextChapterNum = maxChapterNum + 1;
     const selectedModel = model || novel.model || DEFAULT_MODEL;
-    const { host, isCloud } = resolveHost(ollamaEndpoint);
+    const host = resolveHost(ollamaEndpoint);
 
     const lastTail = lastChapter ? lastChapter.content.slice(-1500).trimStart() : "";
     const { system, user: userBase } = buildSystemPrompt(
       novel, nextChapterNum, lastChapter?.chapterNumber ?? null, novel.globalSummary ?? "", lastTail,
     );
-    const userPrompt = additionalContext ? `${userBase}\n\nPETUNJUK TAMBAHAN DARI PENULIS:\n${additionalContext}` : userBase;
+    const userPrompt = additionalContext ? `${userBase}\n\nPETUNJUK TAMBAHAN:\n${additionalContext}` : userBase;
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -183,12 +171,10 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
     res.setHeader("X-Accel-Buffering", "no");
 
     let fullContent = "";
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (isCloud) headers["Authorization"] = `Bearer ${OLLAMA_API_KEY}`;
 
     const ollamaRes = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers,
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: selectedModel,
         messages: [{ role: "system", content: system }, { role: "user", content: userPrompt }],
@@ -273,18 +259,18 @@ router.post("/generate", async (req: Request, res: Response) => {
   const { model, additionalContext, temperature = 0.85, maxTokens = 8000, chapterTitle, ollamaEndpoint } = req.body;
 
   if (generatingNovels.has(novelId)) {
-    return res.status(409).json({ error: "already_generating", message: "Bab sedang di-generate, tunggu hingga selesai." });
+    return res.status(409).json({ error: "already_generating" });
   }
   generatingNovels.add(novelId);
 
   try {
     const ctx = await getNovelContext(novelId);
-    if (!ctx) return res.status(404).json({ error: "not_found", message: "Novel not found" });
+    if (!ctx) return res.status(404).json({ error: "not_found" });
 
     const { novel, maxChapterNum, lastChapter } = ctx;
     const nextChapterNum = maxChapterNum + 1;
     const selectedModel = model || novel.model || DEFAULT_MODEL;
-    const { host, isCloud } = resolveHost(ollamaEndpoint);
+    const host = resolveHost(ollamaEndpoint);
 
     const lastTail = lastChapter ? lastChapter.content.slice(-1500).trimStart() : "";
     const { system, user: userBase } = buildSystemPrompt(
@@ -292,12 +278,9 @@ router.post("/generate", async (req: Request, res: Response) => {
     );
     const userPrompt = additionalContext ? `${userBase}\n\nPETUNJUK TAMBAHAN:\n${additionalContext}` : userBase;
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (isCloud) headers["Authorization"] = `Bearer ${OLLAMA_API_KEY}`;
-
     const ollamaRes = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers,
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: selectedModel,
         messages: [{ role: "system", content: system }, { role: "user", content: userPrompt }],

@@ -1,17 +1,18 @@
-const KEY = "novel-ai-playlist";
+const KEY = "novel-ai-playlist-v2";
 
 export interface Track {
   id: string;
   title: string;
   artist?: string;
-  url: string;
-  cover?: string;
+  url: string;         // blob: URL for uploaded files, https: for streaming
+  isFile?: boolean;    // true if uploaded from local file
+  fileName?: string;   // original filename
 }
 
 export const DEFAULT_TRACKS: Track[] = [
-  { id: "1", title: "Ambient Mystical", artist: "Ambiance", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" },
-  { id: "2", title: "Dark Fantasy", artist: "Ambiance", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3" },
-  { id: "3", title: "Epic Journey", artist: "Ambiance", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3" },
+  { id: "default-1", title: "Ambient Mystical", artist: "Ambiance", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" },
+  { id: "default-2", title: "Dark Fantasy", artist: "Ambiance", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3" },
+  { id: "default-3", title: "Epic Journey", artist: "Ambiance", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3" },
 ];
 
 export function loadPlaylist(): Track[] {
@@ -19,26 +20,18 @@ export function loadPlaylist(): Track[] {
     const raw = localStorage.getItem(KEY);
     if (!raw) return [...DEFAULT_TRACKS];
     const stored = JSON.parse(raw) as Track[];
-    return stored.length > 0 ? stored : [...DEFAULT_TRACKS];
+    // Filter out any blob URLs from previous session (they're invalid after refresh)
+    const filtered = stored.map(t => t.isFile ? { ...t, url: "" } : t);
+    return filtered.length > 0 ? filtered : [...DEFAULT_TRACKS];
   } catch {
     return [...DEFAULT_TRACKS];
   }
 }
 
 export function savePlaylist(tracks: Track[]) {
-  try { localStorage.setItem(KEY, JSON.stringify(tracks)); } catch {}
-}
-
-export function addTrack(track: Omit<Track, "id">): Track {
-  const newTrack: Track = { ...track, id: Date.now().toString() };
-  const list = loadPlaylist();
-  list.push(newTrack);
-  savePlaylist(list);
-  return newTrack;
-}
-
-export function removeTrack(id: string) {
-  const list = loadPlaylist().filter(t => t.id !== id);
-  savePlaylist(list);
-  return list;
+  try {
+    // Don't persist blob URLs — save without them; reload will show "re-upload" state
+    const toSave = tracks.map(t => t.isFile ? { ...t, url: "" } : t);
+    localStorage.setItem(KEY, JSON.stringify(toSave));
+  } catch {}
 }

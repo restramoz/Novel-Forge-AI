@@ -27,15 +27,72 @@ type Character = {
 type Tab = "bab" | "karakter" | "master";
 
 // ─── Character Card ──────────────────────────────────────────────────────────
-function CharacterCard({ char, onDelete }: { char: Character; onDelete: () => void }) {
+function CharacterCard({ char, onDelete, onEdit }: {
+  char: Character;
+  onDelete: () => void;
+  onEdit: (updated: Omit<Character, "id">) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(char.name);
+  const [role, setRole] = useState(char.role);
+  const [description, setDescription] = useState(char.description);
+  const [characteristics, setCharacteristics] = useState(char.characteristics.join(", "));
+  const [avatarEmoji, setAvatarEmoji] = useState(char.avatarEmoji);
+
+  const handleSave = () => {
+    onEdit({
+      name: name.trim() || char.name,
+      role,
+      description: description.trim(),
+      characteristics: characteristics.split(",").map(c => c.trim()).filter(Boolean),
+      avatarEmoji: avatarEmoji.trim() || "👤",
+    });
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+        className="bg-card border border-primary/40 rounded-2xl p-4 space-y-3"
+      >
+        <h3 className="font-semibold text-sm text-primary">Edit Karakter</h3>
+        <div className="flex gap-2">
+          <input placeholder="Emoji" value={avatarEmoji} onChange={e => setAvatarEmoji(e.target.value)}
+            className="w-14 px-2 py-2 rounded-lg bg-background border border-border text-center text-lg focus:outline-none focus:ring-2 focus:ring-primary/50" />
+          <input placeholder="Nama *" value={name} onChange={e => setName(e.target.value)}
+            className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+        </div>
+        <select value={role} onChange={e => setRole(e.target.value)}
+          className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
+          {["Protagonist", "Antagonist", "Supporting", "Mentor", "Villain"].map(r => <option key={r}>{r}</option>)}
+        </select>
+        <textarea placeholder="Deskripsi..." value={description} onChange={e => setDescription(e.target.value)} rows={2}
+          className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/50" />
+        <input placeholder="Karakteristik (pisah koma)" value={characteristics} onChange={e => setCharacteristics(e.target.value)}
+          className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+        <div className="flex gap-2">
+          <button onClick={handleSave} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-1.5">
+            <Save className="w-3.5 h-3.5" /> Simpan
+          </button>
+          <button onClick={() => setEditing(false)} className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground transition-colors">
+            Batal
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
+
   return (
     <div className="bg-card border border-border rounded-2xl p-4 flex flex-col gap-2 group relative">
-      <button
-        onClick={onDelete}
-        className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
-      >
-        <X className="w-4 h-4" />
-      </button>
+      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 flex gap-1 transition-all">
+        <button onClick={() => setEditing(true)} className="p-1 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
+          <Edit3 className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={onDelete} className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-red-500/10 transition-colors">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-2xl shrink-0">
           {char.avatarEmoji}
@@ -293,6 +350,18 @@ export default function NovelDetail() {
   const handleDeleteChar = async (charId: number) => {
     await fetch(`${API_BASE}/api/novels/${novelId}/characters/${charId}`, { method: "DELETE" });
     setCharacters(prev => prev.filter(c => c.id !== charId));
+  };
+
+  const handleEditChar = async (charId: number, updated: Omit<Character, "id">) => {
+    const resp = await fetch(`${API_BASE}/api/novels/${novelId}/characters/${charId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...updated, characteristics: updated.characteristics }),
+    });
+    if (resp.ok) {
+      const saved = await resp.json() as Character;
+      setCharacters(prev => prev.map(c => c.id === charId ? saved : c));
+    }
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -632,7 +701,7 @@ export default function NovelDetail() {
             ) : characters.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {characters.map(char => (
-                  <CharacterCard key={char.id} char={char} onDelete={() => handleDeleteChar(char.id)} />
+                  <CharacterCard key={char.id} char={char} onDelete={() => handleDeleteChar(char.id)} onEdit={updated => handleEditChar(char.id, updated)} />
                 ))}
               </div>
             ) : (

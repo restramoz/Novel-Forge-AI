@@ -17,7 +17,10 @@ interface MusicContextType {
   setVolume: (v: number) => void;
   seek: (pct: number) => void;
   addTrack: (t: Omit<Track, "id">) => void;
+  addTrackFile: (file: File) => void;
   removeTrack: (id: string) => void;
+  updateTrack: (id: string, patch: Partial<Pick<Track, "title" | "artist">>) => void;
+  reattachFile: (id: string, file: File) => void;
   setPlaylist: (tracks: Track[]) => void;
 }
 
@@ -31,21 +34,22 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Map of track id → blob URL (for file-based tracks, session-only)
+  const blobUrlsRef = useRef<Map<string, string>>(new Map());
 
-  // Create audio element once
   useEffect(() => {
     const audio = new Audio();
     audio.volume = volume;
-    audio.loop = false;
     audioRef.current = audio;
 
     const onTimeUpdate = () => setProgress(audio.currentTime);
     const onDurationChange = () => setDuration(audio.duration || 0);
     const onEnded = () => {
       setCurrentIndex(idx => {
-        const next = (idx + 1) % (playlist.length || 1);
-        audio.src = playlist[next]?.url || "";
-        audio.play().catch(() => {});
+        const next = (idx + 1) % Math.max(1, playlist.length);
+        const nextTrack = playlist[next];
+        const url = nextTrack?.isFile ? blobUrlsRef.current.get(nextTrack.id) : nextTrack?.url;
+        if (url) { audio.src = url; audio.play().catch(() => {}); }
         return next;
       });
     };
@@ -59,41 +63,45 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("durationchange", onDurationChange);
       audio.removeEventListener("ended", onEnded);
+      // Revoke all blob URLs
+      blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
     };
   }, []);
 
-  // Load track when index changes
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || playlist.length === 0) return;
-    const track = playlist[currentIndex];
-    if (!track) return;
-    const wasPlaying = isPlaying;
-    audio.src = track.url;
-    audio.load();
-    if (wasPlaying) audio.play().catch(() => {});
-  }, [currentIndex, playlist]);
-
-  // Sync volume
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
+  const getTrackUrl = useCallback((track: Track | null): string => {
+    if (!track) return "";
+    if (track.isFile) return blobUrlsRef.current.get(track.id) || "";
+    return track.url;
+  }, []);
+
   const currentTrack = playlist[currentIndex] ?? null;
+
+  const loadTrack = useCallback((index: number, shouldPlay: boolean) => {
+    const audio = audioRef.current;
+    const track = playlist[index];
+    if (!audio || !track) return;
+    const url = getTrackUrl(track);
+    if (!url) return; // file track without reattached file
+    audio.src = url;
+    audio.load();
+    if (shouldPlay) audio.play().then(() => setIsPlaying(true)).catch(() => {});
+  }, [playlist, getTrackUrl]);
 
   const play = useCallback((index?: number) => {
     const audio = audioRef.current;
     if (!audio) return;
+    const targetIdx = index ?? currentIndex;
     if (index !== undefined && index !== currentIndex) {
       setCurrentIndex(index);
-      const track = playlist[index];
-      if (track) {
-        audio.src = track.url;
-        audio.load();
-      }
+      loadTrack(index, true);
+    } else {
+      audio.play().then(() => setIsPlaying(true)).catch(() => {});
     }
-    audio.play().then(() => setIsPlaying(true)).catch(() => {});
-  }, [currentIndex, playlist]);
+  }, [currentIndex, loadTrack]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -108,36 +116,20 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   const next = useCallback(() => {
     const newIdx = (currentIndex + 1) % Math.max(1, playlist.length);
     setCurrentIndex(newIdx);
-    if (isPlaying) {
-      const audio = audioRef.current;
-      const track = playlist[newIdx];
-      if (audio && track) {
-        audio.src = track.url;
-        audio.play().catch(() => {});
-      }
-    }
-  }, [currentIndex, playlist, isPlaying]);
+    loadTrack(newIdx, isPlaying);
+  }, [currentIndex, playlist.length, isPlaying, loadTrack]);
 
   const prev = useCallback(() => {
     const newIdx = (currentIndex - 1 + Math.max(1, playlist.length)) % Math.max(1, playlist.length);
     setCurrentIndex(newIdx);
-    if (isPlaying) {
-      const audio = audioRef.current;
-      const track = playlist[newIdx];
-      if (audio && track) {
-        audio.src = track.url;
-        audio.play().catch(() => {});
-      }
-    }
-  }, [currentIndex, playlist, isPlaying]);
+    loadTrack(newIdx, isPlaying);
+  }, [currentIndex, playlist.length, isPlaying, loadTrack]);
 
   const setVolume = useCallback((v: number) => setVolumeState(Math.max(0, Math.min(1, v))), []);
 
   const seek = useCallback((pct: number) => {
     const audio = audioRef.current;
-    if (audio && duration > 0) {
-      audio.currentTime = (pct / 100) * duration;
-    }
+    if (audio && duration > 0) audio.currentTime = (pct / 100) * duration;
   }, [duration]);
 
   const addTrack = useCallback((t: Omit<Track, "id">) => {
@@ -149,12 +141,49 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const addTrackFile = useCallback((file: File) => {
+    const id = `file-${Date.now()}`;
+    const blobUrl = URL.createObjectURL(file);
+    blobUrlsRef.current.set(id, blobUrl);
+    const track: Track = {
+      id,
+      title: file.name.replace(/\.[^.]+$/, ""),
+      artist: "Local File",
+      url: "", // not persisted
+      isFile: true,
+      fileName: file.name,
+    };
+    setPlaylistState(prev => {
+      const next = [...prev, track];
+      savePlaylist(next);
+      return next;
+    });
+  }, []);
+
   const removeTrack = useCallback((id: string) => {
+    // Revoke blob URL if exists
+    const blobUrl = blobUrlsRef.current.get(id);
+    if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrlsRef.current.delete(id); }
     setPlaylistState(prev => {
       const next = prev.filter(t => t.id !== id);
       savePlaylist(next);
       return next;
     });
+  }, []);
+
+  const updateTrack = useCallback((id: string, patch: Partial<Pick<Track, "title" | "artist">>) => {
+    setPlaylistState(prev => {
+      const next = prev.map(t => t.id === id ? { ...t, ...patch } : t);
+      savePlaylist(next);
+      return next;
+    });
+  }, []);
+
+  const reattachFile = useCallback((id: string, file: File) => {
+    const blobUrl = URL.createObjectURL(file);
+    blobUrlsRef.current.set(id, blobUrl);
+    // Force track update so UI re-renders (isFile stays true, url still "")
+    setPlaylistState(prev => prev.map(t => t.id === id ? { ...t, fileName: file.name } : t));
   }, []);
 
   const setPlaylist = useCallback((tracks: Track[]) => {
@@ -165,7 +194,8 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   return (
     <MusicCtx.Provider value={{
       playlist, currentIndex, isPlaying, volume, progress, duration, currentTrack,
-      play, pause, toggle, next, prev, setVolume, seek, addTrack, removeTrack, setPlaylist,
+      play, pause, toggle, next, prev, setVolume, seek,
+      addTrack, addTrackFile, removeTrack, updateTrack, reattachFile, setPlaylist,
     }}>
       {children}
     </MusicCtx.Provider>
