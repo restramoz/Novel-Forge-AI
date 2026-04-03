@@ -16,7 +16,7 @@ Novel AI - Platform full-stack untuk membuat dan membaca novel yang digenerate o
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
 - **Frontend**: React + Vite, Tailwind CSS, Shadcn UI, react-query
-- **AI**: Ollama (via ollama.com cloud API)
+- **AI**: Ollama (local http://localhost:11434 default, cloud https://ollama.com, or custom endpoint)
 
 ## Structure
 

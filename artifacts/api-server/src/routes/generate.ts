@@ -5,18 +5,24 @@ import { eq, sql, desc } from "drizzle-orm";
 
 const router: IRouter = Router({ mergeParams: true });
 
-const OLLAMA_HOST = "https://ollama.com";
+const OLLAMA_LOCAL_HOST = "http://localhost:11434";
+const OLLAMA_CLOUD_HOST = "https://ollama.com";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "ff272933709f4fc59467cc47b8c0cd02.XXqy0eSTEGXQ8OAZpfGzH1wR";
 const DEFAULT_MODEL = "deepseek-v3.2:cloud";
 
-// In-memory lock: prevent duplicate concurrent generation for the same novel
 const generatingNovels = new Set<number>();
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-// Build strict anti-loop system prompt
+function resolveHost(endpoint?: string): { host: string; isCloud: boolean } {
+  if (!endpoint || endpoint === "local") return { host: OLLAMA_LOCAL_HOST, isCloud: false };
+  if (endpoint === "cloud") return { host: OLLAMA_CLOUD_HOST, isCloud: true };
+  const isCloud = endpoint.includes("ollama.com");
+  return { host: endpoint, isCloud };
+}
+
 function buildSystemPrompt(
   novel: typeof novelsTable.$inferSelect,
   chapNum: number,
@@ -25,15 +31,28 @@ function buildSystemPrompt(
   lastContent: string,
 ): { system: string; user: string } {
   const isFirstChapter = chapNum === 1;
+  const hasMasterConcept = !!novel.masterConcept?.trim();
+  const hasCustomPrompt = !!novel.customPrompt?.trim();
+
+  const storyContext = hasMasterConcept
+    ? `RENCANA CERITA KESELURUHAN (Master Concept — ikuti ini sebagai panduan utama!):
+${novel.masterConcept}
+
+SINOPSIS AWAL: ${novel.synopsis || "Tidak ada sinopsis"}`
+    : `SINOPSIS: ${novel.synopsis || "Tidak ada sinopsis"}`;
+
+  const customInstruction = hasCustomPrompt
+    ? `\nINSTRUKSI KHUSUS PENULIS:\n${novel.customPrompt}\n`
+    : "";
 
   const system = `Anda adalah Penulis Novel Profesional yang menulis dalam bahasa ${novel.language}.
-
+${customInstruction}
 ATURAN MUTLAK — WAJIB DIPATUHI:
 1. JANGAN mengulang judul novel, perkenalan karakter, atau latar dunia yang sudah ada di bab sebelumnya.
 2. JANGAN menulis ulang atau merangkum kejadian dari bab sebelumnya.
 3. MULAI narasi langsung dari detik terakhir kejadian sebelumnya — sambungkan tanpa jeda.
 4. Gunakan gaya bahasa ${novel.genre} yang deskriptif, intens, dan imersif.
-5. Jika ini Bab ${chapNum}, pastikan alur BERGERAK MAJU, BUKAN berputar atau mengulang.
+5. Jika ini Bab ${chapNum}, pastikan alur BERGERAK MAJU sesuai rencana cerita, BUKAN berputar atau mengulang.
 6. DILARANG menulis kata-kata seperti "Pada bab sebelumnya", "Seperti yang telah kita ketahui", "Kita kembali ke...".
 7. Tulis minimal 1500 kata, dengan dialog bermakna dan deskripsi lingkungan/emosi yang kaya.
 8. Format judul: hanya satu baris "# Bab ${chapNum}: [Judul Kreatif]" lalu langsung isi narasi.
@@ -42,13 +61,12 @@ INFORMASI NOVEL:
 - Judul: ${novel.title}
 - Genre: ${novel.genre}
 - Gaya Penulisan: ${novel.writingStyle || "Deskriptif dan intens"}
-- Sinopsis Awal: ${novel.synopsis || "Tidak ada sinopsis"}
+- ${storyContext}
 
 RINGKASAN DUNIA (MEMORI JANGKA PANJANG):
 ${globalSummary || (isFirstChapter ? "Belum ada ringkasan — ini bab pertama, bangun dunia dari awal." : "Ringkasan belum tersedia.")}`;
 
   let user: string;
-
   if (isFirstChapter) {
     user = `TUGAS: Tulis Bab 1 novel "${novel.title}".
 
@@ -57,6 +75,8 @@ Ini adalah bab pembuka. Perkenalkan:
 - Protagonis utama melalui aksi/situasi, bukan deskripsi datar
 - Konflik atau misteri awal yang langsung menarik pembaca
 - Akhiri dengan hook yang membuat penasaran
+
+${hasMasterConcept ? `PERHATIAN: Ikuti Master Concept sebagai panduan arah cerita keseluruhan.` : ""}
 
 Tulis minimal 1500 kata. Mulai langsung dengan narasi yang kuat.`;
   } else {
@@ -70,7 +90,7 @@ TUGAS: Tulis BAB ${chapNum} dari novel "${novel.title}".
 INSTRUKSI TEGAS:
 - Sambungkan LANGSUNG dari titik akhir konteks di atas.
 - Lanjutkan aksi/dialog/situasi tanpa jeda atau pengulangan.
-- Bawa alur ke konflik atau perkembangan baru yang signifikan.
+- Bawa alur ke konflik atau perkembangan baru yang signifikan sesuai Master Concept.
 - Akhiri bab dengan cliffhanger atau momen intens yang memaksa pembaca lanjut.
 
 Tulis minimal 1500 kata. Langsung mulai narasi tanpa basa-basi.`;
@@ -79,26 +99,18 @@ Tulis minimal 1500 kata. Langsung mulai narasi tanpa basa-basi.`;
   return { system, user };
 }
 
-// Append a 2-sentence summary of the new chapter to global_summary
 async function updateGlobalSummary(novelId: number, chapterNum: number, chapterContent: string) {
   try {
     const [novel] = await db.select({ globalSummary: novelsTable.globalSummary }).from(novelsTable).where(eq(novelsTable.id, novelId));
     const first500Words = chapterContent.trim().split(/\s+/).slice(0, 500).join(" ");
-
-    // Build a compact summary append (using Ollama briefly for summarization)
     const summaryLine = `[Bab ${chapterNum}]: ${first500Words.substring(0, 400)}...`;
-
     const existing = novel?.globalSummary ?? "";
     const separator = existing.trim() ? "\n" : "";
     const newSummary = existing + separator + summaryLine;
-
-    // Keep global summary under 8000 chars (trim oldest entries if too long)
     const trimmed = newSummary.length > 8000 ? "..." + newSummary.slice(-7800) : newSummary;
-
     await db.update(novelsTable).set({ globalSummary: trimmed }).where(eq(novelsTable.id, novelId));
   } catch (err) {
     console.error("Failed to update global summary:", err);
-    // Non-fatal — do not throw
   }
 }
 
@@ -107,40 +119,28 @@ async function updateNovelStats(novelId: number) {
     .select({ count: sql<number>`count(*)`, totalWords: sql<number>`sum(word_count)` })
     .from(chaptersTable)
     .where(eq(chaptersTable.novelId, novelId));
-
   const chapterCount = Number(result[0]?.count ?? 0);
   const wordCount = Number(result[0]?.totalWords ?? 0);
-
-  await db
-    .update(novelsTable)
+  await db.update(novelsTable)
     .set({ chapterCount, wordCount, updatedAt: new Date(), status: "in_progress" })
     .where(eq(novelsTable.id, novelId));
 }
 
-// Get minimal context: novel + only last chapter's tail
-// Uses MAX(chapter_number) so deletions/gaps don't confuse the next number
 async function getNovelContext(novelId: number) {
   const [novel] = await db.select().from(novelsTable).where(eq(novelsTable.id, novelId));
   if (!novel) return null;
-
   const [last] = await db
     .select({ chapterNumber: chaptersTable.chapterNumber, content: chaptersTable.content })
     .from(chaptersTable)
     .where(eq(chaptersTable.novelId, novelId))
     .orderBy(desc(chaptersTable.chapterNumber))
     .limit(1);
-
   const lastChapter = last ?? null;
   const maxChapterNum = lastChapter?.chapterNumber ?? 0;
-
   return { novel, maxChapterNum, lastChapter };
 }
 
-function buildOllamaOptions(
-  temperature: number,
-  maxTokens: number,
-  chapNum: number,
-): Record<string, unknown> {
+function buildOllamaOptions(temperature: number, maxTokens: number, chapNum: number) {
   return {
     temperature,
     num_predict: maxTokens,
@@ -155,9 +155,8 @@ function buildOllamaOptions(
 
 router.post("/generate-stream", async (req: Request, res: Response) => {
   const novelId = parseInt(req.params.id);
-  const { model, additionalContext, temperature = 0.85, maxTokens = 8000, chapterTitle } = req.body;
+  const { model, additionalContext, temperature = 0.85, maxTokens = 8000, chapterTitle, ollamaEndpoint } = req.body;
 
-  // Reject duplicate concurrent generation for the same novel
   if (generatingNovels.has(novelId)) {
     return res.status(409).json({ error: "already_generating", message: "Bab sedang di-generate, tunggu hingga selesai." });
   }
@@ -170,22 +169,13 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
     const { novel, maxChapterNum, lastChapter } = ctx;
     const nextChapterNum = maxChapterNum + 1;
     const selectedModel = model || novel.model || DEFAULT_MODEL;
+    const { host, isCloud } = resolveHost(ollamaEndpoint);
 
-    const lastTail = lastChapter
-      ? lastChapter.content.slice(-1500).trimStart()
-      : "";
-
+    const lastTail = lastChapter ? lastChapter.content.slice(-1500).trimStart() : "";
     const { system, user: userBase } = buildSystemPrompt(
-      novel,
-      nextChapterNum,
-      lastChapter?.chapterNumber ?? null,
-      novel.globalSummary ?? "",
-      lastTail,
+      novel, nextChapterNum, lastChapter?.chapterNumber ?? null, novel.globalSummary ?? "", lastTail,
     );
-
-    const userPrompt = additionalContext
-      ? `${userBase}\n\nPETUNJUK TAMBAHAN DARI PENULIS:\n${additionalContext}`
-      : userBase;
+    const userPrompt = additionalContext ? `${userBase}\n\nPETUNJUK TAMBAHAN DARI PENULIS:\n${additionalContext}` : userBase;
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -193,19 +183,15 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
     res.setHeader("X-Accel-Buffering", "no");
 
     let fullContent = "";
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (isCloud) headers["Authorization"] = `Bearer ${OLLAMA_API_KEY}`;
 
-    const ollamaRes = await fetch(`${OLLAMA_HOST}/api/chat`, {
+    const ollamaRes = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OLLAMA_API_KEY}`,
-      },
+      headers,
       body: JSON.stringify({
         model: selectedModel,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
+        messages: [{ role: "system", content: system }, { role: "user", content: userPrompt }],
         stream: true,
         options: buildOllamaOptions(temperature, maxTokens, nextChapterNum),
       }),
@@ -213,7 +199,6 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
 
     if (!ollamaRes.ok) {
       const errText = await ollamaRes.text();
-      console.error("Ollama error:", ollamaRes.status, errText);
       res.write(`data: ${JSON.stringify({ error: `Ollama error: ${ollamaRes.status} — ${errText}` })}\n\n`);
       res.end();
       return;
@@ -233,27 +218,17 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
     while (!ollamaDone) {
       const { done, value } = await reader.read();
       if (done) break;
-
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
-
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
           const parsed = JSON.parse(line);
           const token = parsed.message?.content ?? parsed.response ?? "";
-          if (token) {
-            fullContent += token;
-            res.write(`data: ${JSON.stringify({ token, done: false })}\n\n`);
-          }
-          if (parsed.done) {
-            ollamaDone = true;
-            break;
-          }
-        } catch {
-          // skip malformed JSON lines
-        }
+          if (token) { fullContent += token; res.write(`data: ${JSON.stringify({ token, done: false })}\n\n`); }
+          if (parsed.done) { ollamaDone = true; break; }
+        } catch { /* skip */ }
       }
     }
 
@@ -264,20 +239,12 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
         ? titleMatch[1].replace(/^Bab\s+\d+[:\s]*/i, "").trim()
         : chapterTitle || `Bab ${nextChapterNum}`;
 
-      // onConflictDoNothing: DB-level guard against duplicate chapter numbers
-      const inserted = await db
-        .insert(chaptersTable)
-        .values({
-          novelId,
-          chapterNumber: nextChapterNum,
-          title: `Bab ${nextChapterNum}: ${detectedTitle}`,
-          content: fullContent,
-          wordCount: wc,
-          isGenerated: true,
-          generationPrompt: userPrompt.substring(0, 600),
-        })
-        .onConflictDoNothing()
-        .returning();
+      const inserted = await db.insert(chaptersTable).values({
+        novelId, chapterNumber: nextChapterNum,
+        title: `Bab ${nextChapterNum}: ${detectedTitle}`,
+        content: fullContent, wordCount: wc, isGenerated: true,
+        generationPrompt: userPrompt.substring(0, 600),
+      }).onConflictDoNothing().returning();
 
       if (inserted.length === 0) {
         res.write(`data: ${JSON.stringify({ done: true, error: `Bab ${nextChapterNum} sudah ada di database.` })}\n\n`);
@@ -285,27 +252,15 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
         return;
       }
 
-      const chapter = inserted[0];
-
-      await Promise.all([
-        updateNovelStats(novelId),
-        updateGlobalSummary(novelId, nextChapterNum, fullContent),
-      ]);
-
-      res.write(`data: ${JSON.stringify({ done: true, chapter })}\n\n`);
+      await Promise.all([updateNovelStats(novelId), updateGlobalSummary(novelId, nextChapterNum, fullContent)]);
+      res.write(`data: ${JSON.stringify({ done: true, chapter: inserted[0] })}\n\n`);
     } else {
       res.write(`data: ${JSON.stringify({ done: true, error: "AI tidak menghasilkan konten" })}\n\n`);
     }
-
     res.end();
   } catch (err) {
     console.error("Generate stream error:", err);
-    try {
-      res.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`);
-      res.end();
-    } catch {
-      res.end();
-    }
+    try { res.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`); res.end(); } catch { res.end(); }
   } finally {
     generatingNovels.delete(novelId);
   }
@@ -315,7 +270,7 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
 
 router.post("/generate", async (req: Request, res: Response) => {
   const novelId = parseInt(req.params.id);
-  const { model, additionalContext, temperature = 0.85, maxTokens = 8000, chapterTitle } = req.body;
+  const { model, additionalContext, temperature = 0.85, maxTokens = 8000, chapterTitle, ollamaEndpoint } = req.body;
 
   if (generatingNovels.has(novelId)) {
     return res.status(409).json({ error: "already_generating", message: "Bab sedang di-generate, tunggu hingga selesai." });
@@ -329,31 +284,23 @@ router.post("/generate", async (req: Request, res: Response) => {
     const { novel, maxChapterNum, lastChapter } = ctx;
     const nextChapterNum = maxChapterNum + 1;
     const selectedModel = model || novel.model || DEFAULT_MODEL;
+    const { host, isCloud } = resolveHost(ollamaEndpoint);
 
     const lastTail = lastChapter ? lastChapter.content.slice(-1500).trimStart() : "";
-
     const { system, user: userBase } = buildSystemPrompt(
-      novel,
-      nextChapterNum,
-      lastChapter?.chapterNumber ?? null,
-      novel.globalSummary ?? "",
-      lastTail,
+      novel, nextChapterNum, lastChapter?.chapterNumber ?? null, novel.globalSummary ?? "", lastTail,
     );
-
     const userPrompt = additionalContext ? `${userBase}\n\nPETUNJUK TAMBAHAN:\n${additionalContext}` : userBase;
 
-    const ollamaRes = await fetch(`${OLLAMA_HOST}/api/chat`, {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (isCloud) headers["Authorization"] = `Bearer ${OLLAMA_API_KEY}`;
+
+    const ollamaRes = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OLLAMA_API_KEY}`,
-      },
+      headers,
       body: JSON.stringify({
         model: selectedModel,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
+        messages: [{ role: "system", content: system }, { role: "user", content: userPrompt }],
         stream: false,
         options: buildOllamaOptions(temperature, maxTokens, nextChapterNum),
       }),
@@ -366,10 +313,7 @@ router.post("/generate", async (req: Request, res: Response) => {
 
     const data = (await ollamaRes.json()) as { message?: { content?: string }; response?: string };
     const fullContent = data.message?.content ?? data.response ?? "";
-
-    if (!fullContent.trim()) {
-      return res.status(502).json({ error: "no_content", message: "AI tidak menghasilkan konten" });
-    }
+    if (!fullContent.trim()) return res.status(502).json({ error: "no_content" });
 
     const wc = countWords(fullContent);
     const titleMatch = fullContent.match(/^#\s+(.+)/m);
@@ -377,29 +321,16 @@ router.post("/generate", async (req: Request, res: Response) => {
       ? titleMatch[1].replace(/^Bab\s+\d+[:\s]*/i, "").trim()
       : chapterTitle || `Bab ${nextChapterNum}`;
 
-    const inserted = await db
-      .insert(chaptersTable)
-      .values({
-        novelId,
-        chapterNumber: nextChapterNum,
-        title: `Bab ${nextChapterNum}: ${detectedTitle}`,
-        content: fullContent,
-        wordCount: wc,
-        isGenerated: true,
-        generationPrompt: userPrompt.substring(0, 600),
-      })
-      .onConflictDoNothing()
-      .returning();
+    const inserted = await db.insert(chaptersTable).values({
+      novelId, chapterNumber: nextChapterNum,
+      title: `Bab ${nextChapterNum}: ${detectedTitle}`,
+      content: fullContent, wordCount: wc, isGenerated: true,
+      generationPrompt: userPrompt.substring(0, 600),
+    }).onConflictDoNothing().returning();
 
-    if (inserted.length === 0) {
-      return res.status(409).json({ error: "duplicate_chapter", message: `Bab ${nextChapterNum} sudah ada.` });
-    }
+    if (inserted.length === 0) return res.status(409).json({ error: "duplicate_chapter" });
 
-    await Promise.all([
-      updateNovelStats(novelId),
-      updateGlobalSummary(novelId, nextChapterNum, fullContent),
-    ]);
-
+    await Promise.all([updateNovelStats(novelId), updateGlobalSummary(novelId, nextChapterNum, fullContent)]);
     res.json(inserted[0]);
   } catch (err) {
     console.error("Generate error:", err);

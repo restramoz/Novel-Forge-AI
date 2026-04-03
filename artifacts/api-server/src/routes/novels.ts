@@ -111,7 +111,7 @@ router.get("/novels/:id", async (req, res) => {
 router.put("/novels/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { title, synopsis, genre, tags, language, model, writingStyle, targetChapters, status, coverImage } = req.body;
+    const { title, synopsis, genre, tags, language, model, writingStyle, targetChapters, status, coverImage, masterConcept, customPrompt } = req.body;
 
     const updateData: Partial<typeof novelsTable.$inferInsert> = { updatedAt: new Date() };
     if (title !== undefined) updateData.title = title;
@@ -124,6 +124,8 @@ router.put("/novels/:id", async (req, res) => {
     if (targetChapters !== undefined) updateData.targetChapters = targetChapters;
     if (status !== undefined) updateData.status = status;
     if (coverImage !== undefined) updateData.coverImage = coverImage;
+    if (masterConcept !== undefined) updateData.masterConcept = masterConcept;
+    if (customPrompt !== undefined) updateData.customPrompt = customPrompt;
 
     const [updated] = await db.update(novelsTable).set(updateData).where(eq(novelsTable.id, id)).returning();
     if (!updated) return res.status(404).json({ error: "not_found", message: "Novel not found" });
@@ -142,6 +144,62 @@ router.delete("/novels/:id", async (req, res) => {
     res.json({ success: true, message: "Novel deleted" });
   } catch (err) {
     console.error("Error deleting novel:", err);
+    res.status(500).json({ error: "internal_error", message: String(err) });
+  }
+});
+
+// Generate master concept from synopsis using AI
+const MASTER_CONCEPT_API_KEY = "ff272933709f4fc59467cc47b8c0cd02.XXqy0eSTEGXQ8OAZpfGzH1wR";
+
+router.post("/novels/:id/generate-master-concept", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { ollamaEndpoint } = req.body;
+
+  try {
+    const [novel] = await db.select().from(novelsTable).where(eq(novelsTable.id, id));
+    if (!novel) return res.status(404).json({ error: "not_found" });
+    if (!novel.synopsis?.trim()) return res.status(400).json({ error: "no_synopsis", message: "Sinopsis kosong." });
+
+    const host = !ollamaEndpoint || ollamaEndpoint === "local" ? "http://localhost:11434"
+      : ollamaEndpoint === "cloud" ? "https://ollama.com" : ollamaEndpoint;
+    const isCloud = host.includes("ollama.com");
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (isCloud) headers["Authorization"] = `Bearer ${MASTER_CONCEPT_API_KEY}`;
+
+    const prompt = `Berdasarkan sinopsis berikut, buat Master Concept (rencana cerita lengkap) untuk novel "${novel.title}" genre ${novel.genre} dalam bahasa ${novel.language}.
+
+Master Concept harus mencakup (format Markdown):
+## Prolog/Pembuka
+## Arc 1 - [Nama Arc]
+## Arc 2 - [Nama Arc]
+## (Arc tambahan jika perlu — tidak ada batasan jumlah arc)
+## Klimaks
+## Ending/Resolusi
+## Catatan Karakter Utama
+
+Buat rencana yang detail, menarik, penuh plot twist, dan konsisten dari awal hingga akhir.
+
+Sinopsis: ${novel.synopsis}`;
+
+    const resp = await fetch(`${host}/api/chat`, {
+      method: "POST", headers,
+      body: JSON.stringify({
+        model: novel.model || "deepseek-v3.2:cloud",
+        messages: [{ role: "user", content: prompt }],
+        stream: false,
+        options: { temperature: 0.75, num_predict: 3000 },
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+
+    if (!resp.ok) return res.status(502).json({ error: "ollama_error", message: await resp.text() });
+
+    const data = await resp.json() as { message?: { content?: string }; response?: string };
+    const concept = data.message?.content ?? data.response ?? "";
+    if (!concept.trim()) return res.status(502).json({ error: "empty_response" });
+
+    res.json({ masterConcept: concept });
+  } catch (err) {
     res.status(500).json({ error: "internal_error", message: String(err) });
   }
 });
