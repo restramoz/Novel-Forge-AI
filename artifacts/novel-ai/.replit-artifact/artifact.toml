@@ -15,14 +15,14 @@ name = "web"
 paths = ["/"]
 
 [services.development]
-run = "pnpm --filter @workspace/novel-ai run dev"
+run = "npm run dev --workspace=@workspace/novel-ai"
 
 [services.env]
 PORT = "19117"
 BASE_PATH = "/"
 
 [services.production]
-build = ["pnpm", "--filter", "@workspace/novel-ai", "run", "build"]
+build = ["npm", "run", "build", "--workspace=@workspace/novel-ai"]
 publicDir = "artifacts/novel-ai/dist/public"
 serve = "static"
 

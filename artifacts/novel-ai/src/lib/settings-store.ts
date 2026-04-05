@@ -1,7 +1,8 @@
-const KEY = "novel-ai-settings";
+// Version bump forces reset of stale/invalid localStorage settings
+const KEY = "novel-ai-settings-v3";
 
 export interface AppSettings {
-  ollamaEndpoint: "local" | string; // "local" or custom URL
+  ollamaEndpoint: "local" | "cloud" | string;
   defaultModel: string;
   readerFontFamily: string;
   readerFontSize: number;
@@ -9,7 +10,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  ollamaEndpoint: "local",
+  ollamaEndpoint: "cloud",
   defaultModel: "deepseek-v3.2:cloud",
   readerFontFamily: "serif",
   readerFontSize: 18,
@@ -32,8 +33,6 @@ export function loadSettings(): AppSettings {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    // Migrate: "cloud" → "local"
-    if (parsed.ollamaEndpoint === "cloud") parsed.ollamaEndpoint = "local";
     return { ...DEFAULT_SETTINGS, ...parsed };
   } catch {
     return { ...DEFAULT_SETTINGS };

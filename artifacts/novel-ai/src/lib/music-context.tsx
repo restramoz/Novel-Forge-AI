@@ -33,139 +33,152 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   const [volume, setVolumeState] = useState(0.6);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
+
+  // Refs — always have the latest values without stale closures
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  // Map of track id → blob URL (for file-based tracks, session-only)
+  const playlistRef = useRef<Track[]>(playlist);
+  const currentIndexRef = useRef(0);
+  const isPlayingRef = useRef(false);
   const blobUrlsRef = useRef<Map<string, string>>(new Map());
 
+  // Keep refs in sync with state
+  useEffect(() => { playlistRef.current = playlist; }, [playlist]);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
+  // Initialize audio element once
   useEffect(() => {
     const audio = new Audio();
     audio.volume = volume;
     audioRef.current = audio;
 
-    const onTimeUpdate = () => setProgress(audio.currentTime);
-    const onDurationChange = () => setDuration(audio.duration || 0);
-    const onEnded = () => {
-      setCurrentIndex(idx => {
-        const next = (idx + 1) % Math.max(1, playlist.length);
-        const nextTrack = playlist[next];
-        const url = nextTrack?.isFile ? blobUrlsRef.current.get(nextTrack.id) : nextTrack?.url;
-        if (url) { audio.src = url; audio.play().catch(() => {}); }
-        return next;
-      });
-    };
-
-    audio.addEventListener("timeupdate", onTimeUpdate);
-    audio.addEventListener("durationchange", onDurationChange);
-    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("timeupdate", () => setProgress(audio.currentTime));
+    audio.addEventListener("durationchange", () => setDuration(audio.duration || 0));
+    audio.addEventListener("ended", () => {
+      const pl = playlistRef.current;
+      const nextIdx = (currentIndexRef.current + 1) % Math.max(1, pl.length);
+      const nextTrack = pl[nextIdx];
+      if (!nextTrack) return;
+      const url = nextTrack.isFile ? blobUrlsRef.current.get(nextTrack.id) : nextTrack.url;
+      if (url) {
+        audio.src = url;
+        audio.load();
+        audio.play().then(() => { setIsPlaying(true); isPlayingRef.current = true; }).catch(() => {});
+      }
+      setCurrentIndex(nextIdx);
+      currentIndexRef.current = nextIdx;
+    });
 
     return () => {
       audio.pause();
-      audio.removeEventListener("timeupdate", onTimeUpdate);
-      audio.removeEventListener("durationchange", onDurationChange);
-      audio.removeEventListener("ended", onEnded);
-      // Revoke all blob URLs
+      audio.src = "";
       blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
-  const getTrackUrl = useCallback((track: Track | null): string => {
-    if (!track) return "";
+  const getTrackUrl = useCallback((track: Track): string => {
     if (track.isFile) return blobUrlsRef.current.get(track.id) || "";
     return track.url;
   }, []);
 
   const currentTrack = playlist[currentIndex] ?? null;
 
-  const loadTrack = useCallback((index: number, shouldPlay: boolean) => {
-    const audio = audioRef.current;
-    const track = playlist[index];
-    if (!audio || !track) return;
-    const url = getTrackUrl(track);
-    if (!url) return; // file track without reattached file
-    audio.src = url;
-    audio.load();
-    if (shouldPlay) audio.play().then(() => setIsPlaying(true)).catch(() => {});
-  }, [playlist, getTrackUrl]);
-
+  // Core play function — always loads src if needed
   const play = useCallback((index?: number) => {
     const audio = audioRef.current;
     if (!audio) return;
-    const targetIdx = index ?? currentIndex;
-    if (index !== undefined && index !== currentIndex) {
-      setCurrentIndex(index);
-      loadTrack(index, true);
-    } else {
-      audio.play().then(() => setIsPlaying(true)).catch(() => {});
+    const pl = playlistRef.current;
+    const targetIdx = index !== undefined ? index : currentIndexRef.current;
+    const track = pl[targetIdx];
+    if (!track) return;
+
+    const url = track.isFile ? blobUrlsRef.current.get(track.id) : track.url;
+    if (!url) return; // file track without blob URL
+
+    // Update index state if changing track
+    if (targetIdx !== currentIndexRef.current) {
+      setCurrentIndex(targetIdx);
+      currentIndexRef.current = targetIdx;
     }
-  }, [currentIndex, loadTrack]);
+
+    // Load src if different
+    if (audio.src !== url) {
+      audio.src = url;
+      audio.load();
+    }
+
+    audio.play()
+      .then(() => { setIsPlaying(true); isPlayingRef.current = true; })
+      .catch((err) => console.error("Play failed:", err));
+  }, []);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
     setIsPlaying(false);
+    isPlayingRef.current = false;
   }, []);
 
   const toggle = useCallback(() => {
-    if (isPlaying) pause();
+    if (isPlayingRef.current) pause();
     else play();
-  }, [isPlaying, play, pause]);
+  }, [play, pause]);
 
   const next = useCallback(() => {
-    const newIdx = (currentIndex + 1) % Math.max(1, playlist.length);
-    setCurrentIndex(newIdx);
-    loadTrack(newIdx, isPlaying);
-  }, [currentIndex, playlist.length, isPlaying, loadTrack]);
+    const pl = playlistRef.current;
+    const newIdx = (currentIndexRef.current + 1) % Math.max(1, pl.length);
+    play(newIdx);
+  }, [play]);
 
   const prev = useCallback(() => {
-    const newIdx = (currentIndex - 1 + Math.max(1, playlist.length)) % Math.max(1, playlist.length);
-    setCurrentIndex(newIdx);
-    loadTrack(newIdx, isPlaying);
-  }, [currentIndex, playlist.length, isPlaying, loadTrack]);
+    const pl = playlistRef.current;
+    const newIdx = (currentIndexRef.current - 1 + Math.max(1, pl.length)) % Math.max(1, pl.length);
+    play(newIdx);
+  }, [play]);
 
   const setVolume = useCallback((v: number) => setVolumeState(Math.max(0, Math.min(1, v))), []);
 
   const seek = useCallback((pct: number) => {
     const audio = audioRef.current;
-    if (audio && duration > 0) audio.currentTime = (pct / 100) * duration;
-  }, [duration]);
+    if (audio && audio.duration > 0) audio.currentTime = (pct / 100) * audio.duration;
+  }, []);
 
   const addTrack = useCallback((t: Omit<Track, "id">) => {
     const track: Track = { ...t, id: Date.now().toString() };
     setPlaylistState(prev => {
       const next = [...prev, track];
+      playlistRef.current = next;
       savePlaylist(next);
       return next;
     });
   }, []);
 
   const addTrackFile = useCallback((file: File) => {
-    const id = `file-${Date.now()}`;
+    const id = `file-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const blobUrl = URL.createObjectURL(file);
     blobUrlsRef.current.set(id, blobUrl);
     const track: Track = {
-      id,
-      title: file.name.replace(/\.[^.]+$/, ""),
-      artist: "Local File",
-      url: "", // not persisted
-      isFile: true,
-      fileName: file.name,
+      id, title: file.name.replace(/\.[^.]+$/, ""),
+      artist: "Local File", url: "", isFile: true, fileName: file.name,
     };
     setPlaylistState(prev => {
       const next = [...prev, track];
+      playlistRef.current = next;
       savePlaylist(next);
       return next;
     });
   }, []);
 
   const removeTrack = useCallback((id: string) => {
-    // Revoke blob URL if exists
     const blobUrl = blobUrlsRef.current.get(id);
     if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrlsRef.current.delete(id); }
     setPlaylistState(prev => {
       const next = prev.filter(t => t.id !== id);
+      playlistRef.current = next;
       savePlaylist(next);
       return next;
     });
@@ -174,20 +187,23 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   const updateTrack = useCallback((id: string, patch: Partial<Pick<Track, "title" | "artist">>) => {
     setPlaylistState(prev => {
       const next = prev.map(t => t.id === id ? { ...t, ...patch } : t);
+      playlistRef.current = next;
       savePlaylist(next);
       return next;
     });
   }, []);
 
   const reattachFile = useCallback((id: string, file: File) => {
+    const old = blobUrlsRef.current.get(id);
+    if (old) URL.revokeObjectURL(old);
     const blobUrl = URL.createObjectURL(file);
     blobUrlsRef.current.set(id, blobUrl);
-    // Force track update so UI re-renders (isFile stays true, url still "")
     setPlaylistState(prev => prev.map(t => t.id === id ? { ...t, fileName: file.name } : t));
   }, []);
 
   const setPlaylist = useCallback((tracks: Track[]) => {
     setPlaylistState(tracks);
+    playlistRef.current = tracks;
     savePlaylist(tracks);
   }, []);
 

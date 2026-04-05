@@ -4,11 +4,21 @@ import { charactersTable, novelsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 
 const router: IRouter = Router({ mergeParams: true });
-const LOCAL_OLLAMA = "http://localhost:11434";
 
-function resolveOllamaHost(endpoint?: string): string {
-  if (!endpoint || endpoint === "local" || endpoint === "cloud") return LOCAL_OLLAMA;
-  return endpoint; // custom URL
+const OLLAMA_CLOUD_HOST = "https://ollama.com";
+const OLLAMA_CLOUD_KEY = process.env.OLLAMA_API_KEY || "ff272933709f4fc59467cc47b8c0cd02.XXqy0eSTEGXQ8OAZpfGzH1wR";
+const OLLAMA_LOCAL_HOST = "http://localhost:11434";
+
+function resolveHost(endpoint?: string): { host: string; isCloud: boolean } {
+  if (!endpoint || endpoint === "local") return { host: OLLAMA_LOCAL_HOST, isCloud: false };
+  if (endpoint === "cloud" || endpoint.includes("ollama.com")) return { host: OLLAMA_CLOUD_HOST, isCloud: true };
+  return { host: endpoint, isCloud: false };
+}
+
+function buildHeaders(isCloud: boolean): Record<string, string> {
+  const h: Record<string, string> = { "Content-Type": "application/json" };
+  if (isCloud) h["Authorization"] = `Bearer ${OLLAMA_CLOUD_KEY}`;
+  return h;
 }
 
 function parseChars(raw: string | null | undefined) {
@@ -88,7 +98,8 @@ router.post("/extract", async (req: Request, res: Response) => {
     const sourceText = (novel.masterConcept?.trim() || novel.synopsis?.trim() || "");
     if (!sourceText) return res.status(400).json({ error: "no_content", message: "Sinopsis/Master Concept novel kosong." });
 
-    const host = resolveOllamaHost(ollamaEndpoint);
+    const { host, isCloud } = resolveHost(ollamaEndpoint);
+    const headers = buildHeaders(isCloud);
 
     const prompt = `Dari teks berikut, ekstrak semua karakter yang disebutkan atau tersirat.
 Kembalikan HANYA JSON array tanpa teks lain:
@@ -107,7 +118,7 @@ ${sourceText.substring(0, 3000)}`;
 
     const resp = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content: prompt }],

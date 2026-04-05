@@ -9,19 +9,19 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@workspace/db": "workspace:*",
-    "@workspace/api-zod": "workspace:*",
-    "drizzle-orm": "catalog:",
+    "@workspace/db": "*",
+    "@workspace/api-zod": "*",
+    "drizzle-orm": "^0.45.1",
     "express": "^5",
     "cookie-parser": "^1.4.7",
     "cors": "^2"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
+    "@types/node": "^25.3.3",
     "@types/express": "^5.0.6",
     "@types/cors": "^2.8.19",
     "@types/cookie-parser": "^1.4.10",
     "esbuild": "^0.27.3",
-    "tsx": "catalog:"
+    "tsx": "^4.21.0"
   }
 }

@@ -5,7 +5,9 @@ import { eq, sql, desc } from "drizzle-orm";
 
 const router: IRouter = Router({ mergeParams: true });
 
-const LOCAL_OLLAMA = "http://localhost:11434";
+const OLLAMA_CLOUD_HOST = "https://ollama.com";
+const OLLAMA_CLOUD_KEY = process.env.OLLAMA_API_KEY || "ff272933709f4fc59467cc47b8c0cd02.XXqy0eSTEGXQ8OAZpfGzH1wR";
+const OLLAMA_LOCAL_HOST = "http://localhost:11434";
 const DEFAULT_MODEL = "deepseek-v3.2:cloud";
 
 const generatingNovels = new Set<number>();
@@ -14,9 +16,20 @@ function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-function resolveHost(endpoint?: string): string {
-  if (!endpoint || endpoint === "local" || endpoint === "cloud") return LOCAL_OLLAMA;
-  return endpoint;
+function resolveHost(endpoint?: string): { host: string; isCloud: boolean } {
+  if (!endpoint || endpoint === "local") {
+    return { host: OLLAMA_LOCAL_HOST, isCloud: false };
+  }
+  if (endpoint === "cloud" || endpoint.includes("ollama.com")) {
+    return { host: OLLAMA_CLOUD_HOST, isCloud: true };
+  }
+  return { host: endpoint, isCloud: false };
+}
+
+function buildHeaders(isCloud: boolean): Record<string, string> {
+  const h: Record<string, string> = { "Content-Type": "application/json" };
+  if (isCloud) h["Authorization"] = `Bearer ${OLLAMA_CLOUD_KEY}`;
+  return h;
 }
 
 function buildSystemPrompt(
@@ -157,7 +170,8 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
     const { novel, maxChapterNum, lastChapter } = ctx;
     const nextChapterNum = maxChapterNum + 1;
     const selectedModel = model || novel.model || DEFAULT_MODEL;
-    const host = resolveHost(ollamaEndpoint);
+    const { host, isCloud } = resolveHost(ollamaEndpoint);
+    const headers = buildHeaders(isCloud);
 
     const lastTail = lastChapter ? lastChapter.content.slice(-1500).trimStart() : "";
     const { system, user: userBase } = buildSystemPrompt(
@@ -174,7 +188,7 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
 
     const ollamaRes = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         model: selectedModel,
         messages: [{ role: "system", content: system }, { role: "user", content: userPrompt }],
@@ -246,7 +260,11 @@ router.post("/generate-stream", async (req: Request, res: Response) => {
     res.end();
   } catch (err) {
     console.error("Generate stream error:", err);
-    try { res.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`); res.end(); } catch { res.end(); }
+    const errMsg = err instanceof Error ? err.message : String(err);
+    try {
+      res.write(`data: ${JSON.stringify({ error: `Koneksi Ollama gagal: ${errMsg}. Pastikan Ollama berjalan atau ganti endpoint di Settings.` })}\n\n`);
+      res.end();
+    } catch { res.end(); }
   } finally {
     generatingNovels.delete(novelId);
   }
@@ -270,7 +288,8 @@ router.post("/generate", async (req: Request, res: Response) => {
     const { novel, maxChapterNum, lastChapter } = ctx;
     const nextChapterNum = maxChapterNum + 1;
     const selectedModel = model || novel.model || DEFAULT_MODEL;
-    const host = resolveHost(ollamaEndpoint);
+    const { host, isCloud } = resolveHost(ollamaEndpoint);
+    const headers = buildHeaders(isCloud);
 
     const lastTail = lastChapter ? lastChapter.content.slice(-1500).trimStart() : "";
     const { system, user: userBase } = buildSystemPrompt(
@@ -280,7 +299,7 @@ router.post("/generate", async (req: Request, res: Response) => {
 
     const ollamaRes = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         model: selectedModel,
         messages: [{ role: "system", content: system }, { role: "user", content: userPrompt }],
