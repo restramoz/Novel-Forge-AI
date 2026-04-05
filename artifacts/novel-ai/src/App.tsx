@@ -1,7 +1,6 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/lib/theme";
-import { MusicProvider } from "@/lib/music-context";
 import Layout from "@/components/layout";
 import Home from "@/pages/home";
 import CreateNovel from "@/pages/create-novel";
@@ -9,12 +8,13 @@ import EditNovel from "@/pages/edit-novel";
 import NovelDetail from "@/pages/novel-detail";
 import Reader from "@/pages/reader";
 import CreateChapter from "@/pages/create-chapter";
-import Music from "@/pages/music";
-import Settings from "@/pages/settings";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { refetchOnWindowFocus: false, staleTime: 1000 * 60 * 5 },
+    queries: {
+      refetchOnWindowFocus: false,
+      staleTime: 1000 * 60 * 5, // 5 minutes
+    },
   },
 });
 
@@ -39,8 +39,6 @@ function Router() {
       <Route path="/novels/:id/read" component={Reader} />
       <Route path="/novels/:id/chapters/new" component={CreateChapter} />
       <Route path="/novels/:id" component={NovelDetail} />
-      <Route path="/music" component={Music} />
-      <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -50,13 +48,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="dark">
-        <MusicProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Layout>
-              <Router />
-            </Layout>
-          </WouterRouter>
-        </MusicProvider>
+        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          <Layout>
+            <Router />
+          </Layout>
+        </WouterRouter>
       </ThemeProvider>
     </QueryClientProvider>
   );

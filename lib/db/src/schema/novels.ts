@@ -11,8 +11,6 @@ export const novelsTable = pgTable("novels", {
   language: text("language").notNull().default("Indonesian"),
   model: text("model").notNull().default("deepseek-v3.2:cloud"),
   globalSummary: text("global_summary").default(""),
-  masterConcept: text("master_concept").default(""),
-  customPrompt: text("custom_prompt").default(""),
   writingStyle: text("writing_style").default(""),
   targetChapters: integer("target_chapters").notNull().default(10),
   chapterCount: integer("chapter_count").notNull().default(0),

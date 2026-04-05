@@ -12,8 +12,7 @@ export function useChapterStream(novelId: number) {
     setError(null);
 
     try {
-      const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-      const res = await fetch(`${base}/api/novels/${novelId}/generate-stream`, {
+      const res = await fetch(`/api/novels/${novelId}/generate-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params),

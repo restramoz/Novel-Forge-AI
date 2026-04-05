@@ -16,7 +16,7 @@ Novel AI - Platform full-stack untuk membuat dan membaca novel yang digenerate o
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
 - **Frontend**: React + Vite, Tailwind CSS, Shadcn UI, react-query
-- **AI**: Ollama (local http://localhost:11434 default, cloud https://ollama.com, or custom endpoint)
+- **AI**: Ollama (via ollama.com cloud API)
 
 ## Structure
 
@@ -61,31 +61,16 @@ artifacts-monorepo/
 - `DELETE /api/novels/:id/chapters/:chapterId` - delete chapter
 - `POST /api/novels/:id/generate-stream` - SSE streaming AI generation
 - `POST /api/novels/:id/generate` - non-streaming AI generation
-- `POST /api/novels/:id/generate-master-concept` - AI generate full story arc plan
-- `GET /api/novels/:id/characters` - list characters
-- `POST /api/novels/:id/characters` - create character
-- `PUT /api/novels/:id/characters/:charId` - update character
-- `DELETE /api/novels/:id/characters/:charId` - delete character
-- `POST /api/novels/:id/characters/extract` - AI extract characters from synopsis
 - `GET /api/models` - list Ollama models
 
 ## Database Schema
 
-- `novels` - Novel table (id, title, synopsis, genre, tags, language, model, writingStyle, targetChapters, chapterCount, wordCount, status, coverImage, masterConcept, customPrompt, globalSummary, timestamps)
+- `novels` - Novel table (id, title, synopsis, genre, tags, language, model, writingStyle, targetChapters, chapterCount, wordCount, status, coverImage, timestamps)
 - `chapters` - Chapter table (id, novelId, chapterNumber, title, content, wordCount, isGenerated, generationPrompt, timestamps)
-- `characters` - Character table (id, novelId, name, role, description, characteristics JSON, avatarEmoji, timestamps)
 
 ## Ollama Integration
 
-- Host: http://localhost:11434 (local only, no API key required)
-- Endpoint options: "local" (default) or custom URL via Settings
+- Host: https://ollama.com
+- API Key: stored in OLLAMA_API_KEY env var (fallback in code)
 - Streaming: SSE via /api/chat endpoint
-- Default model: deepseek-v3.2:cloud
-- No cloud/API key support — fully local Ollama
-
-## Frontend Features
-
-- **Music player**: floating runic ᛗ button, file upload (MP3/OGG/WAV/FLAC), drag & drop, CRUD (add/edit title-artist/delete/re-attach after refresh)
-- **Settings**: Reading font family + size, Ollama endpoint (local/custom), model selector
-- **Novel detail**: tabs (Bab/Karakter/Master Concept), character CRUD with inline edit, AI extract
-- **Music store**: File-based tracks use `URL.createObjectURL()` (session-only); metadata persisted in localStorage key `novel-ai-playlist-v2`
+- Default model: llama3.2

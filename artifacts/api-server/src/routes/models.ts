@@ -2,41 +2,46 @@ import { Router, type IRouter } from "express";
 
 const router: IRouter = Router();
 
-const LOCAL_OLLAMA = "http://localhost:11434";
+const OLLAMA_HOST = "https://ollama.com";
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "ff272933709f4fc59467cc47b8c0cd02.XXqy0eSTEGXQ8OAZpfGzH1wR";
 
-const CURATED_MODELS = [
+const PREFERRED_MODELS = [
   "deepseek-v3.2:cloud",
-  "bjoernb/claude-opus-4-5:latest",
-  "gemma3:27b-cloud",
-  "glm-5:cloud",
-  "rnj-1:8b-cloud",
-  "gemini-3-flash-preview:cloud",
-  "qwen3.5:cloud",
-  "qwen3.5:397b-cloud",
+  "deepseek-v3",
+  "qwen2.5:72b-instruct",
+  "llama-3.3-70b-specdec",
+  "qwen2.5:32b-instruct",
+  "llama3.3:70b",
+  "mistral-large",
+  "qwen2.5:14b-instruct",
+  "llama3.1:8b",
 ];
 
-function resolveHost(endpoint?: string): string {
-  if (!endpoint || endpoint === "local" || endpoint === "cloud") return LOCAL_OLLAMA;
-  return endpoint;
-}
-
-router.get("/models", async (req, res) => {
-  const endpoint = req.query.endpoint as string | undefined;
-  const host = resolveHost(endpoint);
+router.get("/models", async (_req, res) => {
   const now = new Date().toISOString();
 
   try {
-    const response = await fetch(`${host}/api/tags`, { signal: AbortSignal.timeout(4000) });
+    const response = await fetch(`${OLLAMA_HOST}/api/tags`, {
+      headers: { "Authorization": `Bearer ${OLLAMA_API_KEY}` },
+      signal: AbortSignal.timeout(5000),
+    });
+
     if (response.ok) {
       const data = (await response.json()) as { models?: Array<{ name: string; size: number; modified_at: string }> };
-      const fetched = (data.models ?? []).map((m) => ({ name: m.name, size: m.size, modifiedAt: m.modified_at }));
-      if (fetched.length > 0) return res.json({ models: fetched, source: host });
+      const fetched = (data.models ?? []).map((m) => ({
+        name: m.name,
+        size: m.size,
+        modifiedAt: m.modified_at,
+      }));
+      if (fetched.length > 0) return res.json({ models: fetched });
     }
   } catch {
-    // fall through to curated list
+    // fall through to default list
   }
 
-  res.json({ models: CURATED_MODELS.map(name => ({ name, size: 0, modifiedAt: now })), source: "curated" });
+  res.json({
+    models: PREFERRED_MODELS.map((name) => ({ name, size: 0, modifiedAt: now })),
+  });
 });
 
 export default router;
